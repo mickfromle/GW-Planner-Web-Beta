@@ -17,3 +17,5 @@ Current web beta features:
 - Browser-local storage
 
 The GitHub Pages workflow publishes the contents of this directory.
+
+Published via GitHub Pages from the public test repository.
