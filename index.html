@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#080a0c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="robots" content="noindex,nofollow">
+  <title>GW Tactics – Planner Web Beta</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">GW TACTICS</div>
+        <h1>GW PLANNER</h1>
+        <div class="subhead">WEB BETA · TEST BUILD</div>
+      </div>
+      <div class="beta-badge">BETA</div>
+    </header>
+
+    <div class="beta-note">
+      This is a fast-moving beta of the Planner only. Data is stored locally in this browser.
+    </div>
+
+    <main>
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">SEASON</div>
+            <h2>Week setup</h2>
+          </div>
+          <div id="weekTabs" class="week-tabs"></div>
+        </div>
+
+        <div class="setup-grid">
+          <label class="field">
+            <span>WEEK START · TUESDAY</span>
+            <input id="weekStart" type="date">
+          </label>
+          <div class="field">
+            <span>TEAM SIZES</span>
+            <div id="teamSizeGrid" class="team-size-grid"></div>
+          </div>
+        </div>
+        <button id="saveSetupBtn" class="btn btn-secondary">SAVE TEAM SIZES</button>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">GUILD</div>
+            <h2>Players</h2>
+            <div id="playerCount" class="muted"></div>
+          </div>
+          <button id="addPlayerBtn" class="btn btn-primary">+ PLAYER</button>
+        </div>
+        <div class="muted compact">
+          Availability is saved per week. Country and time zone are used to calculate each player's real local play window.
+        </div>
+        <div id="playerList" class="player-list"></div>
+      </section>
+
+      <section class="card action-card">
+        <div>
+          <div class="section-kicker">AUTO PLAN</div>
+          <h2>Create GW week</h2>
+          <div class="muted">Tuesday–Sunday · max. 2 days per player · 18 attacks per player</div>
+        </div>
+        <button id="autoPlanBtn" class="btn btn-primary btn-large">CREATE PLAN</button>
+      </section>
+
+      <section id="planSection" class="card hidden">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">PLAN</div>
+            <h2 id="planTitle">Week preview</h2>
+          </div>
+          <button id="exportBtn" class="btn btn-secondary">EXPORT</button>
+        </div>
+
+        <div id="dayTabs" class="day-tabs"></div>
+        <div id="viewTabs" class="view-tabs"></div>
+        <div id="planPreview" class="preview-wrap"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="playerDialog" class="modal">
+    <form id="playerForm" method="dialog" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="section-kicker">PLAYER</div>
+          <h2 id="playerDialogTitle">Add player</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-player>×</button>
+      </div>
+
+      <input id="playerId" type="hidden">
+
+      <label class="field">
+        <span>NAME</span>
+        <input id="playerName" required maxlength="40" autocomplete="off">
+      </label>
+
+      <label class="field">
+        <span>COUNTRY</span>
+        <input id="countrySearch" placeholder="Search country…" autocomplete="off">
+        <select id="playerCountry" size="6"></select>
+      </label>
+
+      <label id="timeZoneField" class="field">
+        <span>REGION / TIME ZONE</span>
+        <select id="playerTimeZone"></select>
+      </label>
+
+      <div class="two-col">
+        <label class="field">
+          <span>ROLE</span>
+          <select id="playerRole">
+            <option value="PVP">PvP</option>
+            <option value="PVZ">PvZ</option>
+            <option value="BOTH">Both</option>
+          </select>
+        </label>
+
+        <label id="starsField" class="field">
+          <span>PvP STRENGTH</span>
+          <select id="playerStars">
+            <option value="1">★☆☆☆☆</option>
+            <option value="2">★★☆☆☆</option>
+            <option value="3" selected>★★★☆☆</option>
+            <option value="4">★★★★☆</option>
+            <option value="5">★★★★★</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="two-col">
+        <label class="field">
+          <span>LOCAL PLAY FROM</span>
+          <select id="playStart"></select>
+        </label>
+        <label class="field">
+          <span>LOCAL PLAY UNTIL</span>
+          <select id="playEnd"></select>
+        </label>
+      </div>
+
+      <button id="spareToggle" type="button" class="toggle-btn">NOT PREFERRED FOR SPARE</button>
+
+      <div class="modal-actions">
+        <button id="deletePlayerBtn" type="button" class="btn btn-danger hidden">DELETE</button>
+        <span class="grow"></span>
+        <button type="button" class="btn btn-secondary" data-close-player>CANCEL</button>
+        <button type="submit" class="btn btn-primary">SAVE PLAYER</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="exportDialog" class="modal">
+    <form id="exportForm" method="dialog" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="section-kicker">EXPORT</div>
+          <h2>Select screenshots</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-export>×</button>
+      </div>
+
+      <label class="field">
+        <span>RANGE</span>
+        <select id="exportRange"></select>
+      </label>
+
+      <div class="check-list">
+        <label><input type="checkbox" name="exportView" value="MAP" checked> <span>MAP · ISLAND ASSIGNMENTS</span></label>
+        <label><input type="checkbox" name="exportView" value="PLAYERS" checked> <span>PLAYERS · ASSIGNMENTS / VPS</span></label>
+        <label><input type="checkbox" name="exportView" value="TIMELINE" checked> <span>TIMELINE · STACKING</span></label>
+      </div>
+
+      <div id="exportStatus" class="muted compact"></div>
+
+      <div class="modal-actions">
+        <span class="grow"></span>
+        <button type="button" class="btn btn-secondary" data-close-export>CANCEL</button>
+        <button type="submit" class="btn btn-primary">SHARE SELECTED</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast"></div>
+  <div id="captureRoot" class="capture-root" aria-hidden="true"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/moment@2.30.1/min/moment.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/moment-timezone@0.5.48/builds/moment-timezone-with-data-1970-2030.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="./data.js"></script>
+  <script src="./planner-engine.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
