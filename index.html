@@ -107,6 +107,17 @@
       </label>
 
       <label class="field">
+        <span>SHORT CODE</span>
+        <input id="playerShortCode" maxlength="3" autocomplete="off" autocapitalize="characters" placeholder="e.g. CH, SO, TF">
+      </label>
+
+      <div class="field">
+        <span>PLAYER COLOR</span>
+        <input id="playerColor" type="hidden" value="#1694ff">
+        <div id="playerColorPalette" class="player-color-palette" aria-label="Available player colors"></div>
+      </div>
+
+      <label class="field">
         <span>COUNTRY</span>
         <input id="countrySearch" placeholder="Search country…" autocomplete="off">
         <select id="playerCountry" size="6"></select>
@@ -150,7 +161,7 @@
         </label>
       </div>
 
-      <button id="spareToggle" type="button" class="toggle-btn">NOT PREFERRED FOR SPARE</button>
+      <button id="spareToggle" type="button" class="toggle-btn">NOT PREFERRED FOR DOUBLE ATTACKS</button>
 
       <div class="modal-actions">
         <button id="deletePlayerBtn" type="button" class="btn btn-danger hidden">DELETE</button>
@@ -177,8 +188,7 @@
       </label>
 
       <div class="check-list">
-        <label><input type="checkbox" name="exportView" value="MAP" checked> <span>MAP · ISLAND ASSIGNMENTS</span></label>
-        <label><input type="checkbox" name="exportView" value="PLAYERS" checked> <span>PLAYERS · ASSIGNMENTS / VPS</span></label>
+        <label><input type="checkbox" name="exportView" value="MAP" checked> <span>MAP · ISLANDS + PLAYER ASSIGNMENTS</span></label>
         <label><input type="checkbox" name="exportView" value="TIMELINE" checked> <span>TIMELINE · STACKING</span></label>
       </div>
 
