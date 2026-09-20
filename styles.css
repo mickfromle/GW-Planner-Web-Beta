@@ -970,8 +970,26 @@ select[size] { min-height: 180px; }
   margin: 2px 0 0;
 }
 
+.preview-week-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  overflow-x: hidden;
+  margin-top: 2px;
+  margin-bottom: 8px;
+}
+
+.preview-week-tabs .tab {
+  min-width: 0;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
 .preview-day-tabs {
-  margin-top: 0;
+  margin-top: 4px;
+  margin-bottom: 6px;
 }
 
 .preview-screen-wrap {
