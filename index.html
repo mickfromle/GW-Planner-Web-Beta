@@ -118,6 +118,26 @@
     </div>
   </dialog>
 
+  <dialog id="reviewDialog" class="modal">
+    <div class="modal-card review-card">
+      <div class="modal-head">
+        <div>
+          <div class="section-kicker">GW TACTICS</div>
+          <h2 id="reviewDialogTitle">Review</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-review>×</button>
+      </div>
+
+      <div id="reviewDialogMessage" class="review-message"></div>
+
+      <div class="modal-actions">
+        <span class="grow"></span>
+        <button id="reviewCancelBtn" type="button" class="btn btn-secondary">CANCEL</button>
+        <button id="reviewConfirmBtn" type="button" class="btn btn-primary">OK</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="playerDialog" class="modal">
     <form id="playerForm" method="dialog" class="modal-card">
       <div class="modal-head">
