@@ -406,7 +406,6 @@
       (requestedIds||[]).filter(id=>id!==playerId && byId.has(id))
     );
 
-    // New selections join their already-established owner group.
     [...requested].filter(id=>!previousGroup.has(id)).forEach(id=>{
       const account=byId.get(id);
       (account?.linkedAccountIds||[]).forEach(groupId=>{
@@ -414,16 +413,142 @@
       });
     });
 
+    const current=byId.get(playerId);
+    const inheritedMainId=
+      current?.accountType==="SECOND" &&
+      current?.mainAccountId &&
+      (requested.has(current.mainAccountId)||previousGroup.has(current.mainAccountId))
+        ? current.mainAccountId
+        : null;
+    const mainId=requested.size ? (inheritedMainId || playerId) : null;
     const finalGroup=new Set([playerId,...requested]);
+    const main=mainId ? byId.get(mainId) : null;
+
     state.players.forEach(account=>{
       if(finalGroup.has(account.id)){
         account.linkedAccountIds=[...finalGroup].filter(id=>id!==account.id);
+        if(mainId && account.id===mainId){
+          account.accountType="MAIN";
+          account.mainAccountId=null;
+        } else if(mainId){
+          account.accountType="SECOND";
+          account.mainAccountId=mainId;
+          if(main){
+            account.countryCode=main.countryCode;
+            account.timeZoneId=main.timeZoneId;
+          }
+        }
       } else {
         account.linkedAccountIds=(account.linkedAccountIds||[])
           .filter(id=>!finalGroup.has(id));
       }
     });
   }
+  async function requestDetachedAccountLocations(accounts) {
+    const resolved=new Map();
+    for(const account of accounts){
+      const location=await chooseDetachedAccountLocation(account);
+      if(!location)return null;
+      resolved.set(account.id,location);
+    }
+    return resolved;
+  }
+
+  function chooseDetachedAccountLocation(account) {
+    return new Promise(resolve=>{
+      const dialog=document.createElement("dialog");
+      dialog.className="modal";
+      const card=document.createElement("form");
+      card.method="dialog";
+      card.className="modal-card";
+
+      const head=document.createElement("div");
+      head.className="modal-head";
+      const titleWrap=document.createElement("div");
+      const kicker=document.createElement("div");
+      kicker.className="section-kicker";
+      kicker.textContent="SECOND ACCOUNT REMOVED";
+      const title=document.createElement("h2");
+      title.textContent=account.name;
+      titleWrap.append(kicker,title);
+      head.appendChild(titleWrap);
+
+      const info=document.createElement("p");
+      info.className="muted";
+      info.textContent="Which country does this account belong to now?";
+
+      const countryLabel=document.createElement("label");
+      countryLabel.className="field";
+      const countryText=document.createElement("span");
+      countryText.textContent="COUNTRY";
+      const country=document.createElement("select");
+      D.COUNTRIES.forEach(item=>{
+        const option=document.createElement("option");
+        option.value=item.code;
+        option.textContent=item.name;
+        if(item.code===account.countryCode)option.selected=true;
+        country.appendChild(option);
+      });
+      countryLabel.append(countryText,country);
+
+      const zoneLabel=document.createElement("label");
+      zoneLabel.className="field";
+      const zoneText=document.createElement("span");
+      zoneText.textContent="REGION / TIME ZONE";
+      const zone=document.createElement("select");
+      zoneLabel.append(zoneText,zone);
+
+      const refillZones=()=>{
+        let zones=D.timeZonesForCountry(country.value);
+        if(!zones.length){
+          zones=[{id:Intl.DateTimeFormat().resolvedOptions().timeZone||"UTC",label:"Default time zone"}];
+        }
+        zone.innerHTML="";
+        zones.forEach(item=>{
+          const option=document.createElement("option");
+          option.value=item.id;
+          option.textContent=item.label;
+          zone.appendChild(option);
+        });
+        zoneLabel.classList.toggle("hidden",zones.length<=1);
+      };
+      country.onchange=refillZones;
+      refillZones();
+
+      const actions=document.createElement("div");
+      actions.className="modal-actions";
+      const cancel=document.createElement("button");
+      cancel.type="button";
+      cancel.className="btn btn-secondary";
+      cancel.textContent="CANCEL";
+      const save=document.createElement("button");
+      save.type="button";
+      save.className="btn btn-primary";
+      save.textContent="SAVE COUNTRY";
+      actions.append(cancel,save);
+
+      card.append(head,info,countryLabel,zoneLabel,actions);
+      dialog.appendChild(card);
+      document.body.appendChild(dialog);
+
+      const close=value=>{
+        try{if(dialog.open)dialog.close();}catch(_){}
+        dialog.remove();
+        resolve(value);
+      };
+      cancel.onclick=()=>close(null);
+      save.onclick=()=>close({
+        countryCode:country.value,
+        timeZoneId:zone.value
+      });
+      dialog.addEventListener("cancel",event=>{
+        event.preventDefault();
+        close(null);
+      });
+      openModalSafe(dialog);
+    });
+  }
+
   function openPlayer(id) {
     const p=id ? state.players.find(x=>x.id===id) : null;
     el.playerDialogTitle.textContent=p?"Edit player":"Add player"; el.playerId.value=p?p.id:""; el.playerName.value=p?p.name:"";
@@ -438,7 +563,7 @@
     el.deletePlayerBtn.classList.toggle("hidden",!p); el.playerDialog.showModal();
   }
   function closePlayer() { if (el.playerDialog.open) el.playerDialog.close(); }
-  function savePlayer(event) {
+  async function savePlayer(event) {
     event.preventDefault();
     const id=el.playerId.value || (crypto.randomUUID ? crypto.randomUUID() : "p"+Date.now());
     const existing=state.players.find(x=>x.id===id);
@@ -453,12 +578,35 @@
       ? el.doublePreference.value
       : "ALLOWED";
     const linkedAccountIds=selectedLinkedAccounts();
+    const detachedSecondAccounts=(previousLinkedIds||[])
+      .filter(linkedId=>!linkedAccountIds.includes(linkedId))
+      .map(linkedId=>state.players.find(x=>x.id===linkedId))
+      .filter(account=>account && account.accountType==="SECOND" && account.mainAccountId===id);
+    const detachedLocations=detachedSecondAccounts.length
+      ? await requestDetachedAccountLocations(detachedSecondAccounts)
+      : new Map();
+    if(detachedLocations===null)return;
+
     const p={id,name,shortCode,colorHex,countryCode:el.playerCountry.value,timeZoneId:el.playerTimeZone.value,role,
       pvpStars:role==="PVZ"?null:Number(el.playerStars.value),preferredStartMinutes:Number(el.playStart.value),
       preferredEndMinutes:Number(el.playEnd.value),preferredSpare:doubleAttackPreference==="PREFERRED",
-      doubleAttackPreference,linkedAccountIds};
+      doubleAttackPreference,
+      accountType:existing?.accountType||"MAIN",
+      mainAccountId:existing?.mainAccountId||null,
+      linkedAccountIds};
     const i=state.players.findIndex(x=>x.id===id); if (i>=0) state.players[i]=p; else state.players.push(p);
     applyLinkedAccountGroup(id,linkedAccountIds,previousLinkedIds);
+
+    detachedLocations.forEach((location,accountId)=>{
+      const detached=state.players.find(x=>x.id===accountId);
+      if(!detached)return;
+      detached.countryCode=location.countryCode;
+      detached.timeZoneId=location.timeZoneId;
+      detached.accountType="MAIN";
+      detached.mainAccountId=null;
+      detached.linkedAccountIds=[];
+    });
+
     saveState(); closePlayer(); renderPlayers(); renderPlan(); toast("Player saved.");
   }
   function deletePlayer() {
