@@ -718,10 +718,12 @@
     const countries=[...D.COUNTRIES]
       .map(c=>c.name+" ["+c.code+"]")
       .sort((a,b)=>a.localeCompare(b));
-    const zones=(window.moment?.tz?.names?.() || ["UTC"])
-      .slice()
-      .sort()
-      .map(id=>id.split("/").map(x=>x.replaceAll("_"," ")).join(" · ")+" ["+id+"]");
+    const timeZonesByCountry=new Map(
+      D.COUNTRIES.map(country=>[
+        country.code,
+        D.timeZonesForCountry(country.code).map(z=>z.label+" ["+z.id+"]")
+      ])
+    );
     const roles=["PvP","PvZ","Both"];
     const strengths=["1","2","3","4","5"];
     const doubleOptions=[
@@ -759,16 +761,1107 @@
     const instructionSheet=XLSX.utils.aoa_to_sheet(instructionRows);
     instructionSheet["!cols"]=[{wch:100}];
 
-    const max=Math.max(countries.length,zones.length,roles.length,strengths.length,doubleOptions.length,times.length);
-    const listRows=[["Countries","Time Zones","Roles","PvP Strength","Double Attacks","Times"]];
+    const baseColumns=[
+      ["Countries",countries],
+      ["Roles",roles],
+      ["PvP Strength",strengths],
+      ["Double Attacks",doubleOptions],
+      ["Times",times],
+    ];
+    const zoneColumns=D.COUNTRIES.map(country=>[
+      "TZ_"+country.code.replaceAll("-","_"),
+      timeZonesByCountry.get(country.code)||[]
+    ]);
+    const linkColumns=Array.from({length:100},(_,offset)=>{
+      const sourceRow=offset+2;
+      const formulas=Array.from({length:100},(_,candidateOffset)=>{
+        const candidateRow=candidateOffset+2;
+        return {
+          f:'IF(Players!$A
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation(
+        "C2:C101",
+        'INDIRECT("TZ_"&SUBSTITUTE(MID($B2,FIND("[",$B2)+1,FIND("]",$B2)-FIND("[",$B2)-1),"-","_"))'
+      ),
+      validation("D2:D101","INDIRECT(\"'Lists'!$B$2:$B$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$C$2:$C$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$E$2:$E$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$D$2:$D$"+(doubleOptions.length+1)+"\")")
+    ];
+    for(let row=2;row<=101;row++){
+      const helperCol=XLSX.utils.encode_col(baseColumns.length+zoneColumns.length+(row-2));
+      validations.push(
+        validation(
+          "I"+row+":L"+row,
+          'INDIRECT("'Lists'!
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      const allowedZones=(D.timeZonesForCountry(countryCode)||[]).map(z=>z.id);
+      if(!timeZoneId||!zoneIsValid(timeZoneId)||!allowedZones.includes(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++candidateRow+'<>Players!$A
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++sourceRow+',Players!$A
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++candidateRow+',"")'
+        };
+      });
+      return ["LINK_"+sourceRow,formulas];
+    });
+    const allColumns=[...baseColumns,...zoneColumns,...linkColumns];
+    const max=Math.max(...allColumns.map(([,values])=>values.length));
+    const listRows=[allColumns.map(([header])=>header)];
     for(let i=0;i<max;i++){
-      listRows.push([
-        countries[i]||"",zones[i]||"",roles[i]||"",strengths[i]||"",
-        doubleOptions[i]||"",times[i]||""
-      ]);
+      listRows.push(allColumns.map(([,values])=>values[i]??""));
     }
     const listSheet=XLSX.utils.aoa_to_sheet(listRows);
-    listSheet["!cols"]=[{wch:34},{wch:34},{wch:18},{wch:18},{wch:30},{wch:16}];
+    listSheet["!cols"]=allColumns.map((_,index)=>({wch:index===0?34:index<5?24:30}));
 
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,playerSheet,"Players");
@@ -780,6 +1873,2888 @@
       {Hidden:0},
       {Hidden:1},
     ];
+    wb.Workbook.Names=zoneColumns.map((entry,index)=>{
+      const values=entry[1];
+      const col=XLSX.utils.encode_col(baseColumns.length+index);
+      const endRow=Math.max(2,values.length+1);
+      return {
+        Name:entry[0],
+        Ref:"Lists!$"+col+"$2:$"+col+"$"+endRow
+      };
+    });
+    wb.Workbook.CalcPr={calcMode:"auto",fullCalcOnLoad:true,forceFullCalc:true};
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++helperCol+'$2:
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++candidateRow+'<>Players!$A
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++sourceRow+',Players!$A
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++candidateRow+',"")'
+        };
+      });
+      return ["LINK_"+sourceRow,formulas];
+    });
+    const allColumns=[...baseColumns,...zoneColumns,...linkColumns];
+    const max=Math.max(...allColumns.map(([,values])=>values.length));
+    const listRows=[allColumns.map(([header])=>header)];
+    for(let i=0;i<max;i++){
+      listRows.push(allColumns.map(([,values])=>values[i]??""));
+    }
+    const listSheet=XLSX.utils.aoa_to_sheet(listRows);
+    listSheet["!cols"]=allColumns.map((_,index)=>({wch:index===0?34:index<5?24:30}));
+
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,playerSheet,"Players");
+    XLSX.utils.book_append_sheet(wb,instructionSheet,"Instructions");
+    XLSX.utils.book_append_sheet(wb,listSheet,"Lists");
+    wb.Workbook=wb.Workbook||{};
+    wb.Workbook.Sheets=[
+      {Hidden:0},
+      {Hidden:0},
+      {Hidden:1},
+    ];
+    wb.Workbook.Names=zoneColumns.map((entry,index)=>{
+      const values=entry[1];
+      const col=XLSX.utils.encode_col(baseColumns.length+index);
+      const endRow=Math.max(2,values.length+1);
+      return {
+        Name:entry[0],
+        Ref:"Lists!$"+col+"$2:$"+col+"$"+endRow
+      };
+    });
+    wb.Workbook.CalcPr={calcMode:"auto",fullCalcOnLoad:true,forceFullCalc:true};
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++helperCol+'$101")'
+        )
+      );
+    }
+
+    xml=xml.replace(
+      "</sheetData>",
+      '</sheetData><dataValidations count="'+validations.length+'">'+validations.join("")+'</dataValidations>'
+    );
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++candidateRow+'<>Players!$A
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++sourceRow+',Players!$A
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
+        return;
+      }
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
+
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        html:true,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
+  function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
+  document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
+  document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
+  el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
+  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+})();
++candidateRow+',"")'
+        };
+      });
+      return ["LINK_"+sourceRow,formulas];
+    });
+    const allColumns=[...baseColumns,...zoneColumns,...linkColumns];
+    const max=Math.max(...allColumns.map(([,values])=>values.length));
+    const listRows=[allColumns.map(([header])=>header)];
+    for(let i=0;i<max;i++){
+      listRows.push(allColumns.map(([,values])=>values[i]??""));
+    }
+    const listSheet=XLSX.utils.aoa_to_sheet(listRows);
+    listSheet["!cols"]=allColumns.map((_,index)=>({wch:index===0?34:index<5?24:30}));
+
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,playerSheet,"Players");
+    XLSX.utils.book_append_sheet(wb,instructionSheet,"Instructions");
+    XLSX.utils.book_append_sheet(wb,listSheet,"Lists");
+    wb.Workbook=wb.Workbook||{};
+    wb.Workbook.Sheets=[
+      {Hidden:0},
+      {Hidden:0},
+      {Hidden:1},
+    ];
+    wb.Workbook.Names=zoneColumns.map((entry,index)=>{
+      const values=entry[1];
+      const col=XLSX.utils.encode_col(baseColumns.length+index);
+      const endRow=Math.max(2,values.length+1);
+      return {
+        Name:entry[0],
+        Ref:"Lists!$"+col+"$2:$"+col+"$"+endRow
+      };
+    });
+    wb.Workbook.CalcPr={calcMode:"auto",fullCalcOnLoad:true,forceFullCalc:true};
 
     const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
     const zip=await JSZip.loadAsync(bytes);
