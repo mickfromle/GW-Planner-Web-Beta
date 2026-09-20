@@ -6,6 +6,7 @@ window.GWPlannerEngine = (() => {
   const BATTLE_DURATION_MINUTES = 22 * 60;
   const PVP_HANDOFF_TARGET_MINUTES = 4 * 60;
   const PVP_SUPPORT_TARGET_MINUTES = 3 * 60;
+  const MAX_CRITICAL_PATH_IDLE_MINUTES = 2 * 60;
   const C_UNLOCK_BUFFER_MINUTES = 30;
   // General rule for PvP and PvZ: one attack takes at most ~5 minutes.
   const ATTACK_DURATION_MINUTES = 5;
@@ -619,6 +620,67 @@ window.GWPlannerEngine = (() => {
     );
   }
 
+  function criticalPathIdleMinutes(players,weekPlan,dayId) {
+    const dayPlan=weekPlan.days[dayId];
+    if(!dayPlan || dayPlan.teamSize===0) return 0;
+
+    const islands=createIslandAssignments(players,weekPlan,dayId);
+    if(!islands.length) return null;
+
+    const timeline=createTimeline(players,weekPlan,dayId);
+    const starts=new Map(timeline.map(x=>[x.playerId,x.suggestedOffsetMinutes]));
+    const missionsByPlayer=new Map();
+
+    islands.flatMap(x=>x.missions)
+      .filter(m=>m.active && m.playerId)
+      .forEach(m=>{
+        if(!missionsByPlayer.has(m.playerId)) missionsByPlayer.set(m.playerId,[]);
+        missionsByPlayer.get(m.playerId).push(m);
+      });
+
+    const count=(playerId,sectors,kind=null)=>
+      (missionsByPlayer.get(playerId)||[]).filter(m=>
+        sectors.has(m.island.slice(-1)) && (!kind || m.kind===kind)
+      ).length;
+
+    const ab=new Set(["A","B"]);
+
+    const abPvzComplete=Math.max(
+      0,
+      ...dayPlan.playerIds.map(playerId=>{
+        const n=count(playerId,ab,"PVZ");
+        return n>0 && starts.has(playerId)
+          ? starts.get(playerId)+n*ATTACK_DURATION_MINUTES
+          : 0;
+      })
+    );
+
+    const abPvpStarts=dayPlan.playerIds
+      .filter(playerId=>count(playerId,ab,"PVP")>0 && starts.has(playerId))
+      .map(playerId=>starts.get(playerId));
+    const firstAbPvpStart=abPvpStarts.length ? Math.min(...abPvpStarts) : null;
+
+    const abPvpComplete=Math.max(
+      abPvzComplete,
+      ...dayPlan.playerIds.map(playerId=>{
+        const n=count(playerId,ab,"PVP");
+        return n>0 && starts.has(playerId)
+          ? starts.get(playerId)+n*ATTACK_DURATION_MINUTES
+          : 0;
+      })
+    );
+
+    const cStarts=dayPlan.playerIds
+      .filter(playerId=>count(playerId,new Set(["C"]))>0 && starts.has(playerId))
+      .map(playerId=>starts.get(playerId));
+    const firstCStart=cStarts.length ? Math.min(...cStarts) : null;
+
+    const abIdle=firstAbPvpStart===null ? 0 : Math.max(0,firstAbPvpStart-abPvzComplete);
+    const cIdle=firstCStart===null ? 0 : Math.max(0,firstCStart-abPvpComplete);
+
+    return Math.max(abIdle,cIdle);
+  }
+
   function findStackOverlap(sparePlayer, possiblePartners, weekPlan, dayId, spareAttacks, target) {
     const earliest=target.earliestOffsetMinutes||0;
     const preferred=target.preferredOffsetMinutes||0;
@@ -1130,10 +1192,10 @@ window.GWPlannerEngine = (() => {
         .slice(0,dp.teamSize);
       const load=MISSION_LOADS[dp.teamSize];
       const core=ordered.map(id=>byId.get(id)).filter(Boolean).filter(pvpCapable).sort((a,b)=>{
-        if((a.pvpStars||0)!==(b.pvpStars||0)) return (b.pvpStars||0)-(a.pvpStars||0);
         const ap=timingPenalty(a,current,day.id,PVP_HANDOFF_TARGET_MINUTES);
         const bp=timingPenalty(b,current,day.id,PVP_HANDOFF_TARGET_MINUTES);
         if(ap!==bp) return ap-bp;
+        if((a.pvpStars||0)!==(b.pvpStars||0)) return (b.pvpStars||0)-(a.pvpStars||0);
         if((a.role==="PVP")!==(b.role==="PVP")) return a.role==="PVP"?-1:1;
         return byName(a,b);
       }).slice(0,load.primaryPvpPlayers).map(p=>p.id);
@@ -1155,6 +1217,21 @@ window.GWPlannerEngine = (() => {
           day.id,
           dp.teamSize,
           scheduledPlayers.size
+        );
+      }
+
+      const criticalIdle=criticalPathIdleMinutes(players,current,day.id);
+      if(
+        criticalIdle===null ||
+        criticalIdle>MAX_CRITICAL_PATH_IDLE_MINUTES
+      ) {
+        return fail(
+          current,
+          requiredSlots,
+          "PVP_TIMING",
+          day.id,
+          MAX_CRITICAL_PATH_IDLE_MINUTES,
+          criticalIdle===null ? 999999 : criticalIdle
         );
       }
 
