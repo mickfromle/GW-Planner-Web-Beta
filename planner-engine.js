@@ -1192,10 +1192,10 @@ window.GWPlannerEngine = (() => {
         .slice(0,dp.teamSize);
       const load=MISSION_LOADS[dp.teamSize];
       const core=ordered.map(id=>byId.get(id)).filter(Boolean).filter(pvpCapable).sort((a,b)=>{
+        if((a.pvpStars||0)!==(b.pvpStars||0)) return (b.pvpStars||0)-(a.pvpStars||0);
         const ap=timingPenalty(a,current,day.id,PVP_HANDOFF_TARGET_MINUTES);
         const bp=timingPenalty(b,current,day.id,PVP_HANDOFF_TARGET_MINUTES);
         if(ap!==bp) return ap-bp;
-        if((a.pvpStars||0)!==(b.pvpStars||0)) return (b.pvpStars||0)-(a.pvpStars||0);
         if((a.role==="PVP")!==(b.role==="PVP")) return a.role==="PVP"?-1:1;
         return byName(a,b);
       }).slice(0,load.primaryPvpPlayers).map(p=>p.id);
