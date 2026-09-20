@@ -1144,6 +1144,20 @@ window.GWPlannerEngine = (() => {
     for(const day of DAYS) {
       const dp=current.days[day.id];
       if(dp.teamSize===0) continue;
+
+      const dependencyTimeline=createTimeline(players,current,day.id);
+      const scheduledPlayers=new Set(dependencyTimeline.map(x=>x.playerId));
+      if(scheduledPlayers.size<dp.teamSize) {
+        return fail(
+          current,
+          requiredSlots,
+          "PVP_TIMING",
+          day.id,
+          dp.teamSize,
+          scheduledPlayers.size
+        );
+      }
+
       const load=MISSION_LOADS[dp.teamSize];
       if(load.requiresStacking) {
         const stack=createStackPlan(players,current,day.id);
