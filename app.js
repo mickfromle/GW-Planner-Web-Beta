@@ -13,7 +13,7 @@
     playerName:byId("playerName"), playerShortCode:byId("playerShortCode"), playerColor:byId("playerColor"), playerColorPalette:byId("playerColorPalette"), countrySearch:byId("countrySearch"), playerCountry:byId("playerCountry"),
     timeZoneField:byId("timeZoneField"), playerTimeZone:byId("playerTimeZone"), playerRole:byId("playerRole"),
     playerStars:byId("playerStars"), starsField:byId("starsField"), playStart:byId("playStart"),
-    playEnd:byId("playEnd"), spareToggle:byId("spareToggle"), deletePlayerBtn:byId("deletePlayerBtn"),
+    playEnd:byId("playEnd"), linkedAccountsList:byId("linkedAccountsList"), doublePreference:byId("doublePreference"), deletePlayerBtn:byId("deletePlayerBtn"),
     exportDialog:byId("exportDialog"), exportForm:byId("exportForm"), exportRange:byId("exportRange"),
     exportStatus:byId("exportStatus"), toast:byId("toast"), captureRoot:byId("captureRoot")
   };
@@ -145,12 +145,51 @@
       usedCodes.add(player.shortCode.toUpperCase());
       player.colorHex=normalizeColorHex(player.colorHex) ||
         D.PLAYER_COLORS[index % D.PLAYER_COLORS.length].toUpperCase();
+      const legacyPreferred=!!player.preferredSpare;
+      player.doubleAttackPreference=
+        ["PREFERRED","ALLOWED","DO_NOT_USE"].includes(player.doubleAttackPreference)
+          ? player.doubleAttackPreference
+          : (legacyPreferred?"PREFERRED":"ALLOWED");
+      player.preferredSpare=player.doubleAttackPreference==="PREFERRED";
+      player.linkedAccountIds=Array.isArray(player.linkedAccountIds)
+        ? [...new Set(player.linkedAccountIds.filter(Boolean))]
+        : [];
+    });
+
+    // Normalize linked accounts into symmetric owner groups.
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const seen=new Set();
+    state.players.forEach(player=>{
+      if(seen.has(player.id)) return;
+      const group=new Set([player.id]);
+      const queue=[player.id];
+      while(queue.length){
+        const id=queue.shift();
+        const current=byId.get(id);
+        if(!current) continue;
+        (current.linkedAccountIds||[]).forEach(linkedId=>{
+          if(byId.has(linkedId) && !group.has(linkedId)){
+            group.add(linkedId);
+            queue.push(linkedId);
+          }
+        });
+        state.players.forEach(other=>{
+          if((other.linkedAccountIds||[]).includes(id) && !group.has(other.id)){
+            group.add(other.id);
+            queue.push(other.id);
+          }
+        });
+      }
+      group.forEach(id=>{
+        const current=byId.get(id);
+        if(current) current.linkedAccountIds=[...group].filter(x=>x!==id);
+        seen.add(id);
+      });
     });
   }
   state.selectedWeek = Math.max(1, Math.min(4, state.selectedWeek || 1));
   let selectedDay = D.DAYS[0].id;
   let selectedView = "MAP";
-  let editingSpare = false;
   let shortCodeTouched = false;
   let toastTimer = null;
 
@@ -239,7 +278,7 @@
       const row=document.createElement("div"); row.className="player-row";
       const main=document.createElement("div"); main.className="player-main";
       const stars=p.role!=="PVZ" ? " · "+"★".repeat(p.pvpStars || 3) : "";
-      const spare=p.preferredSpare ? " · SPARE" : "";
+      const spare=p.doubleAttackPreference==="PREFERRED" ? " · DOUBLE" : "";
       main.innerHTML='<img class="flag" src="'+esc(D.flagUrl(p.countryCode))+'" alt=""><div><div class="player-name">'+esc(p.name)+'</div><div class="player-meta"><span class="roster-code" style="background:'+playerColor(p)+';color:'+contrast(playerColor(p))+'">'+esc(playerCode(p))+'</span> · '+esc(roleLabel(p.role))+stars+spare+'</div></div>';
       main.onclick=()=>openPlayer(p.id);
       const edit=document.createElement("button"); edit.type="button"; edit.className="btn btn-secondary"; edit.textContent="EDIT"; edit.onclick=()=>openPlayer(p.id);
@@ -287,9 +326,60 @@
     el.playStart.value=String(Math.round(range[0]/30)*30 % 1440);
     let end=Math.round(range[1]/30)*30; if (end===0) end=1440; el.playEnd.value=String(Math.min(1440,end));
   }
-  function updateSpare() {
-    el.spareToggle.classList.toggle("on",editingSpare);
-    el.spareToggle.textContent=editingSpare?"✓ PREFERRED FOR DOUBLE ATTACKS":"NOT PREFERRED FOR DOUBLE ATTACKS";
+  function renderLinkedAccounts(currentId,selectedIds=[]) {
+    const selected=new Set(selectedIds || []);
+    el.linkedAccountsList.innerHTML="";
+    const candidates=[...state.players]
+      .filter(p=>p.id!==currentId)
+      .sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:"base"}));
+
+    if(!candidates.length){
+      el.linkedAccountsList.innerHTML='<div class="muted compact">No other accounts available.</div>';
+      return;
+    }
+
+    candidates.forEach(account=>{
+      const label=document.createElement("label");
+      const input=document.createElement("input");
+      input.type="checkbox";
+      input.value=account.id;
+      input.checked=selected.has(account.id);
+      const text=document.createElement("span");
+      text.textContent=account.name;
+      label.append(input,text);
+      el.linkedAccountsList.appendChild(label);
+    });
+  }
+
+  function selectedLinkedAccounts() {
+    return [...el.linkedAccountsList.querySelectorAll('input[type="checkbox"]:checked')]
+      .map(x=>x.value);
+  }
+
+  function applyLinkedAccountGroup(playerId,requestedIds,previousLinkedIds=[]) {
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const previousGroup=new Set([playerId,...(previousLinkedIds||[])]);
+    const requested=new Set(
+      (requestedIds||[]).filter(id=>id!==playerId && byId.has(id))
+    );
+
+    // New selections join their already-established owner group.
+    [...requested].filter(id=>!previousGroup.has(id)).forEach(id=>{
+      const account=byId.get(id);
+      (account?.linkedAccountIds||[]).forEach(groupId=>{
+        if(groupId!==playerId && byId.has(groupId)) requested.add(groupId);
+      });
+    });
+
+    const finalGroup=new Set([playerId,...requested]);
+    state.players.forEach(account=>{
+      if(finalGroup.has(account.id)){
+        account.linkedAccountIds=[...finalGroup].filter(id=>id!==account.id);
+      } else {
+        account.linkedAccountIds=(account.linkedAccountIds||[])
+          .filter(id=>!finalGroup.has(id));
+      }
+    });
   }
   function openPlayer(id) {
     const p=id ? state.players.find(x=>x.id===id) : null;
@@ -298,7 +388,9 @@
     el.playerColor.value=(p?playerColor(p):suggestPlayerColor(null)).toLowerCase();
     el.countrySearch.value=""; const country=p?p.countryCode:"DE"; populateCountries("",country); populateZones(country,p?p.timeZoneId:null,false);
     el.playerRole.value=p?p.role:"PVZ"; el.playerStars.value=String(p && p.pvpStars ? p.pvpStars : 3);
-    el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ"); editingSpare=!!(p&&p.preferredSpare); updateSpare();
+    el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
+    el.doublePreference.value=p?.doubleAttackPreference || (p?.preferredSpare?"PREFERRED":"ALLOWED");
+    renderLinkedAccounts(p?.id || null,p?.linkedAccountIds || []);
     if (p) { el.playStart.value=String(p.preferredStartMinutes); el.playEnd.value=String(p.preferredEndMinutes); } else setDefaultWindow();
     el.deletePlayerBtn.classList.toggle("hidden",!p); el.playerDialog.showModal();
   }
@@ -306,22 +398,32 @@
   function savePlayer(event) {
     event.preventDefault();
     const id=el.playerId.value || (crypto.randomUUID ? crypto.randomUUID() : "p"+Date.now());
+    const existing=state.players.find(x=>x.id===id);
+    const previousLinkedIds=existing?.linkedAccountIds || [];
     const name=el.playerName.value.trim(); if (!name) return;
     if (state.players.some(p=>p.id!==id && p.name.trim().toLowerCase()===name.toLowerCase())) return toast("A player with this name already exists.");
     const shortCode=normalizeShortCode(el.playerShortCode.value) || suggestShortCode(name,id);
     if (state.players.some(p=>p.id!==id && playerCode(p).toLowerCase()===shortCode.toLowerCase())) return toast("This short code is already used by another player.");
     const colorHex=normalizeColorHex(el.playerColor.value) || suggestPlayerColor(id);
     const role=el.playerRole.value;
+    const doubleAttackPreference=["PREFERRED","ALLOWED","DO_NOT_USE"].includes(el.doublePreference.value)
+      ? el.doublePreference.value
+      : "ALLOWED";
+    const linkedAccountIds=selectedLinkedAccounts();
     const p={id,name,shortCode,colorHex,countryCode:el.playerCountry.value,timeZoneId:el.playerTimeZone.value,role,
       pvpStars:role==="PVZ"?null:Number(el.playerStars.value),preferredStartMinutes:Number(el.playStart.value),
-      preferredEndMinutes:Number(el.playEnd.value),preferredSpare:editingSpare};
+      preferredEndMinutes:Number(el.playEnd.value),preferredSpare:doubleAttackPreference==="PREFERRED",
+      doubleAttackPreference,linkedAccountIds};
     const i=state.players.findIndex(x=>x.id===id); if (i>=0) state.players[i]=p; else state.players.push(p);
+    applyLinkedAccountGroup(id,linkedAccountIds,previousLinkedIds);
     saveState(); closePlayer(); renderPlayers(); renderPlan(); toast("Player saved.");
   }
   function deletePlayer() {
     const id=el.playerId.value; const p=state.players.find(x=>x.id===id);
     if (!p || !confirm("Delete "+p.name+"?")) return;
-    state.players=state.players.filter(x=>x.id!==id);
+    state.players=state.players
+      .filter(x=>x.id!==id)
+      .map(x=>({...x,linkedAccountIds:(x.linkedAccountIds||[]).filter(linkedId=>linkedId!==id)}));
     Object.values(state.weeks).forEach(w=>D.DAYS.forEach(day=>{
       const dp=w.days[day.id]; dp.playerIds=dp.playerIds.filter(x=>x!==id); dp.pvpCorePlayerIds=dp.pvpCorePlayerIds.filter(x=>x!==id); dp.unavailablePlayerIds=dp.unavailablePlayerIds.filter(x=>x!==id);
     }));
@@ -560,6 +662,5 @@
   el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
   el.playerTimeZone.onchange=setDefaultWindow;
   el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
-  el.spareToggle.onclick=()=>{editingSpare=!editingSpare;updateSpare();};
   fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
 })();
