@@ -7,7 +7,7 @@
     weekTabs:byId("weekTabs"), weekStart:byId("weekStart"), teamSizeGrid:byId("teamSizeGrid"),
     saveSetupBtn:byId("saveSetupBtn"), playerCount:byId("playerCount"), playerList:byId("playerList"),
     addPlayerBtn:byId("addPlayerBtn"), playerDataBtn:byId("playerDataBtn"), autoPlanBtn:byId("autoPlanBtn"), planSection:byId("planSection"),
-    planTitle:byId("planTitle"), dayTabs:byId("dayTabs"), viewTabs:byId("viewTabs"),
+    planTitle:byId("planTitle"), previewWeekTabs:byId("previewWeekTabs"), dayTabs:byId("dayTabs"), viewTabs:byId("viewTabs"),
     planPreview:byId("planPreview"), exportBtn:byId("exportBtn"), playerDialog:byId("playerDialog"),
     playerForm:byId("playerForm"), playerDialogTitle:byId("playerDialogTitle"), playerId:byId("playerId"),
     playerName:byId("playerName"), playerShortCode:byId("playerShortCode"), playerColor:byId("playerColor"), playerColorPalette:byId("playerColorPalette"), countrySearch:byId("countrySearch"), playerCountry:byId("playerCountry"),
@@ -823,6 +823,20 @@
       selectedDay=(availableDays[0]||D.DAYS[0]).id;
     }
     el.planTitle.textContent="Week "+w.week+" preview";
+    el.previewWeekTabs.innerHTML="";
+    for(let n=1;n<=4;n++){
+      const b=document.createElement("button");
+      b.type="button";
+      b.className="tab"+(n===state.selectedWeek?" active":"");
+      b.textContent="WEEK "+n;
+      b.onclick=()=>{
+        state.selectedWeek=n;
+        ensureWeek(n);
+        saveState();
+        renderAll();
+      };
+      el.previewWeekTabs.appendChild(b);
+    }
     el.dayTabs.innerHTML="";
     D.DAYS.forEach(d=>{
       const dp=w.days[d.id];
