@@ -31,13 +31,27 @@
       .join("");
   }
   function defaultShortCode(name) {
+    const compact=[...String(name || "").toUpperCase()]
+      .filter(ch=>/[\p{L}\p{N}]/u.test(ch)).join("");
+    if(!compact) return "PLR";
+
     const parts=String(name || "").trim().split(/\s+/)
-      .map(part=>[...part].filter(ch=>/[\p{L}\p{N}]/u.test(ch)).join(""))
+      .map(part=>[...part.toUpperCase()].filter(ch=>/[\p{L}\p{N}]/u.test(ch)).join(""))
       .filter(Boolean);
-    if(!parts.length) return "";
-    const raw=parts.length>=2
-      ? parts.slice(0,3).map(part=>[...part].find(ch=>/\p{L}/u.test(ch)) || [...part][0]).join("")
-      : [...parts[0]].slice(0,2).join("");
+
+    let raw=parts.length>=2
+      ? parts.slice(0,3).map(part=>[...part][0]).join("")
+      : compact.slice(0,3);
+
+    for(const ch of compact){
+      if(raw.length>=3) break;
+      if(!raw.includes(ch)) raw+=ch;
+    }
+    for(const ch of compact){
+      if(raw.length>=3) break;
+      raw+=ch;
+    }
+    while(raw.length<3) raw+=raw.at(-1)||"P";
     return normalizeShortCode(raw);
   }
   function uniqueShortCode(name, preferred, used) {
@@ -45,12 +59,12 @@
       .filter(ch=>/[\p{L}\p{N}]/u.test(ch)).join("");
     const base=defaultShortCode(name) || "P";
     const candidates=[
-      normalizeShortCode(preferred),
+      normalizeShortCode(preferred).length===3 ? normalizeShortCode(preferred) : "",
       base,
       normalizeShortCode(compact.slice(0,3)),
       compact.length>=2 ? normalizeShortCode(compact[0]+compact[compact.length-1]) : "",
       compact.length>=3 ? normalizeShortCode(compact[0]+compact[1]+compact[compact.length-1]) : ""
-    ].filter(Boolean);
+    ].filter(code=>code && code.length===3);
     for(const code of [...new Set(candidates)]) {
       if(!used.has(code.toUpperCase())) return code;
     }
@@ -61,9 +75,8 @@
     return base;
   }
   function playerCode(player) {
-    return normalizeShortCode(player && player.shortCode) ||
-      defaultShortCode(player && player.name) ||
-      "P";
+    const stored=normalizeShortCode(player && player.shortCode);
+    return stored.length===3 ? stored : defaultShortCode(player && player.name);
   }
   function suggestShortCode(name, excludingId) {
     const used=new Set(state.players
@@ -445,7 +458,8 @@
     const previousLinkedIds=existing?.linkedAccountIds || [];
     const name=el.playerName.value.trim(); if (!name) return;
     if (state.players.some(p=>p.id!==id && p.name.trim().toLowerCase()===name.toLowerCase())) return toast("A player with this name already exists.");
-    const shortCode=normalizeShortCode(el.playerShortCode.value) || suggestShortCode(name,id);
+    const enteredShortCode=normalizeShortCode(el.playerShortCode.value);
+    const shortCode=enteredShortCode.length===3 ? enteredShortCode : suggestShortCode(name,id);
     if (state.players.some(p=>p.id!==id && playerCode(p).toLowerCase()===shortCode.toLowerCase())) return toast("This short code is already used by another player.");
     const colorHex=normalizeColorHex(el.playerColor.value) || suggestPlayerColor(id);
     const role=el.playerRole.value;
