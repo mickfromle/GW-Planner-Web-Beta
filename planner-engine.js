@@ -33,7 +33,7 @@ window.GWPlannerEngine = (() => {
     },
   ];
 
-  const PHASE_ORDER = { OPENING:0, FLEX:1, PVP_SUPPORT:2, PVP_CORE_AB:3, PVP_CORE_C:4 };
+  const PHASE_ORDER = { OPENING:0, FLEX:1, PVP_SUPPORT:2, PVP_CORE_AB:3, OPEN_C:4, PVP_CORE_C:5 };
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -563,15 +563,34 @@ window.GWPlannerEngine = (() => {
       abPvpCompletions.size ? Math.max(...abPvpCompletions.values()) : 0
     );
 
-    const cStarts = new Map();
+    const cPvzStarts = new Map();
+    const cPvzCompletions = new Map();
+
     dayPlan.playerIds.forEach(playerId => {
-      const count=countMissions(playerId,new Set(["C"]));
+      const count=countMissions(playerId,new Set(["C"]),"PVZ");
       if(!count) return;
       const player=byId.get(playerId);
       if(!player) return;
       const startOffset=earliestPreferredOffset(player,weekPlan,dayId,abComplete);
       if(startOffset===null) return;
-      cStarts.set(playerId,startOffset);
+      cPvzStarts.set(playerId,startOffset);
+      cPvzCompletions.set(playerId,startOffset+count*ATTACK_DURATION_MINUTES);
+    });
+
+    const cPvzComplete=Math.max(
+      abComplete,
+      cPvzCompletions.size ? Math.max(...cPvzCompletions.values()) : abComplete
+    );
+
+    const cPvpStarts = new Map();
+    dayPlan.playerIds.forEach(playerId => {
+      const count=countMissions(playerId,new Set(["C"]),"PVP");
+      if(!count) return;
+      const player=byId.get(playerId);
+      if(!player) return;
+      const startOffset=earliestPreferredOffset(player,weekPlan,dayId,cPvzComplete);
+      if(startOffset===null) return;
+      cPvpStarts.set(playerId,startOffset);
     });
 
     const entries=dayPlan.playerIds.map(playerId => {
@@ -580,16 +599,20 @@ window.GWPlannerEngine = (() => {
       const load=loads.get(playerId);
       const abPvzCount=countMissions(playerId,abSectors,"PVZ");
       const abPvpCount=countMissions(playerId,abSectors,"PVP");
-      const cCount=countMissions(playerId,new Set(["C"]));
+      const cPvzCount=countMissions(playerId,new Set(["C"]),"PVZ");
+      const cPvpCount=countMissions(playerId,new Set(["C"]),"PVP");
       const dCount=countMissions(playerId,new Set(["D"]));
       const coreIndex=(dayPlan.pvpCorePlayerIds||[]).indexOf(playerId);
 
       let phase="FLEX";
       let offset=null;
 
-      if(cCount>0 && abPvzCount===0 && abPvpCount===0){
+      if(cPvzCount>0 && abPvzCount===0 && abPvpCount===0){
+        phase="OPEN_C";
+        offset=cPvzStarts.get(playerId) ?? null;
+      } else if(cPvpCount>0 && abPvzCount===0 && abPvpCount===0){
         phase="PVP_CORE_C";
-        offset=cStarts.get(playerId) ?? null;
+        offset=cPvpStarts.get(playerId) ?? null;
       } else if(abPvzCount>0){
         phase="OPENING";
         offset=abPvzStarts.get(playerId) ?? null;
@@ -670,15 +693,31 @@ window.GWPlannerEngine = (() => {
       })
     );
 
-    const cStarts=dayPlan.playerIds
-      .filter(playerId=>count(playerId,new Set(["C"]))>0 && starts.has(playerId))
+    const cPvzStarts=dayPlan.playerIds
+      .filter(playerId=>count(playerId,new Set(["C"]),"PVZ")>0 && starts.has(playerId))
       .map(playerId=>starts.get(playerId));
-    const firstCStart=cStarts.length ? Math.min(...cStarts) : null;
+    const firstCPvzStart=cPvzStarts.length ? Math.min(...cPvzStarts) : null;
+
+    const cPvzComplete=Math.max(
+      abPvpComplete,
+      ...dayPlan.playerIds.map(playerId=>{
+        const n=count(playerId,new Set(["C"]),"PVZ");
+        return n>0 && starts.has(playerId)
+          ? starts.get(playerId)+n*ATTACK_DURATION_MINUTES
+          : 0;
+      })
+    );
+
+    const cPvpStarts=dayPlan.playerIds
+      .filter(playerId=>count(playerId,new Set(["C"]),"PVP")>0 && starts.has(playerId))
+      .map(playerId=>starts.get(playerId));
+    const firstCPvpStart=cPvpStarts.length ? Math.min(...cPvpStarts) : null;
 
     const abIdle=firstAbPvpStart===null ? 0 : Math.max(0,firstAbPvpStart-abPvzComplete);
-    const cIdle=firstCStart===null ? 0 : Math.max(0,firstCStart-abPvpComplete);
+    const cOpenIdle=firstCPvzStart===null ? 0 : Math.max(0,firstCPvzStart-abPvpComplete);
+    const cPvpIdle=firstCPvpStart===null ? 0 : Math.max(0,firstCPvpStart-cPvzComplete);
 
-    return Math.max(abIdle,cIdle);
+    return Math.max(abIdle,cOpenIdle,cPvpIdle);
   }
 
   function findStackOverlap(sparePlayer, possiblePartners, weekPlan, dayId, spareAttacks, target) {
