@@ -757,6 +757,12 @@
     XLSX.utils.book_append_sheet(wb,playerSheet,"Players");
     XLSX.utils.book_append_sheet(wb,instructionSheet,"Instructions");
     XLSX.utils.book_append_sheet(wb,listSheet,"Lists");
+    wb.Workbook=wb.Workbook||{};
+    wb.Workbook.Sheets=[
+      {Hidden:0},
+      {Hidden:0},
+      {Hidden:1},
+    ];
 
     const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
     const zip=await JSZip.loadAsync(bytes);
