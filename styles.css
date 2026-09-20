@@ -150,7 +150,26 @@ main { display: grid; gap: 14px; }
   background: linear-gradient(180deg, #f12b3c, #bc1423);
   border-color: #ff5160;
 }
-.day-tabs { margin-top: 4px; }
+.day-tabs {
+  margin-top: 4px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  overflow-x: hidden;
+}
+.day-tabs .tab {
+  min-width: 0;
+  width: 100%;
+  padding: 0 4px;
+}
+.day-tabs .tab.unavailable,
+.day-tabs .tab:disabled {
+  opacity: .26;
+  color: #778088;
+  border-color: rgba(70,81,88,.35);
+  background: rgba(32,38,42,.42);
+  cursor: default;
+}
 .view-tabs { margin: 8px 0 12px; }
 .view-tabs .tab { flex: 1 1 0; min-width: 100px; font-size: 12px; }
 
@@ -933,8 +952,8 @@ select[size] { min-height: 180px; }
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px;
+  gap: 6px;
+  padding: 10px;
   background:
     radial-gradient(circle at 0 0, rgba(112,15,27,.34), transparent 34%),
     #080a0c;
@@ -952,7 +971,7 @@ select[size] { min-height: 180px; }
 }
 
 .preview-day-tabs {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .preview-screen-wrap {
