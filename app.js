@@ -1215,8 +1215,31 @@
     }
   }
 
+  function openModalSafe(dialog) {
+    if (!dialog) return;
+    try {
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else {
+        dialog.setAttribute("open","");
+        dialog.open=true;
+      }
+    } catch (err) {
+      console.error(err);
+      dialog.setAttribute("open","");
+      dialog.open=true;
+    }
+  }
+
+  function runUiAction(action, fallbackMessage) {
+    try { action(); }
+    catch (err) {
+      console.error(err);
+      toast(fallbackMessage || "Something went wrong. Please reload the page.");
+    }
+  }
+
   function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
-  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.saveSetupBtn.onclick=()=>runUiAction(()=>saveSetup(true),"Could not save the setup."); el.addPlayerBtn.onclick=()=>runUiAction(()=>openPlayer(),"Could not open player editor."); el.playerDataBtn.onclick=()=>runUiAction(()=>openModalSafe(el.playerDataDialog),"Could not open Player Data."); el.autoPlanBtn.onclick=()=>runUiAction(()=>createPlan(),"Could not create the plan."); el.exportBtn.onclick=()=>runUiAction(()=>openExport(),"Could not open export.");
   el.openPreviewBtn.onclick=()=>{renderPlan();if(!el.planPreviewDialog.open)el.planPreviewDialog.showModal();};
   document.querySelectorAll("[data-close-plan-preview]").forEach(x=>x.onclick=()=>el.planPreviewDialog.close());
   el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
