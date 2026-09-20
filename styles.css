@@ -851,3 +851,23 @@ select[size] { min-height: 180px; }
   .modal-actions .grow { display: none; }
   .modal-actions .btn { flex: 1 1 auto; }
 }
+
+
+.flag-small {
+  width: 22px;
+  height: 15px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.timeline-player {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.timeline-phase {
+  color: var(--muted);
+  font-size: 11px;
+}
