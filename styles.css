@@ -206,7 +206,7 @@ select[size] { min-height: 180px; }
 .flag {
   width: 29px;
   height: 20px;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 2px;
   flex: 0 0 auto;
   box-shadow: 0 0 0 1px rgba(255,255,255,.16);
@@ -870,4 +870,28 @@ select[size] { min-height: 180px; }
 .timeline-phase {
   color: var(--muted);
   font-size: 11px;
+}
+
+
+.combined-table th:nth-child(1) { width: 21%; }
+.combined-table th:nth-child(2) { width: 22%; }
+.combined-table th:nth-child(3) { width: 7%; }
+.combined-table th:nth-child(4) { width: 10%; }
+.combined-table th:nth-child(5),
+.combined-table th:nth-child(6) { width: 6%; }
+.combined-table th:nth-child(7) { width: 28%; }
+
+.combined-table .local-task {
+  color: var(--muted);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.combined-table .stack-chip {
+  white-space: normal;
+  line-height: 1.3;
+}
+
+.combined-table .player-cell {
+  white-space: nowrap;
 }
