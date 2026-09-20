@@ -895,3 +895,19 @@ select[size] { min-height: 180px; }
 .combined-table .player-cell {
   white-space: nowrap;
 }
+
+
+.player-assignment-name {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.played-by {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  margin-top: 2px;
+  white-space: nowrap;
+}
