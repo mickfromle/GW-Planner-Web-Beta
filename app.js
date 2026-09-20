@@ -725,7 +725,7 @@
       ])
     );
     const roles=["PvP","PvZ","Both"];
-    const strengths=["1","2","3","4","5"];
+    const strengths=["1 ★☆☆☆☆","2 ★★☆☆☆","3 ★★★☆☆","4 ★★★★☆","5 ★★★★★"];
     const doubleOptions=[
       "Preferred for double attacks",
       "Allowed for double attacks",
@@ -877,7 +877,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -1233,7 +1233,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -1588,7 +1588,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -1976,7 +1976,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -2310,7 +2310,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -2665,7 +2665,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -3020,7 +3020,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -3408,7 +3408,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -3750,7 +3750,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -4105,7 +4105,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -4460,7 +4460,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
@@ -4848,7 +4848,7 @@
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
+      const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
       const from=minutesFromTemplate(row["Local Play From"]);
       const until=minutesFromTemplate(row["Local Play Until"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
