@@ -800,10 +800,26 @@
     const w=week(),hasAssignments=D.DAYS.some(d=>w.days[d.id].playerIds.length>0),valid=hasAssignments&&E.isPlanValid(state.players,w);
     el.autoPlanBtn.textContent=hasAssignments?"REPLAN WEEK "+w.week:"AUTO PLAN WEEK "+w.week;
     el.planSection.classList.toggle("hidden",!valid); if(!valid)return;
-    if(!w.days[selectedDay])selectedDay=D.DAYS[0].id;
+    const availableDays=D.DAYS.filter(d=>{
+      const dp=w.days[d.id];
+      return dp && dp.teamSize>0 && dp.playerIds.length>0;
+    });
+    if(!w.days[selectedDay] || !availableDays.some(d=>d.id===selectedDay)){
+      selectedDay=(availableDays[0]||D.DAYS[0]).id;
+    }
     el.planTitle.textContent="Week "+w.week+" preview";
     el.dayTabs.innerHTML="";
-    D.DAYS.forEach(d=>{const b=document.createElement("button");b.type="button";b.className="tab"+(d.id===selectedDay?" active":"");b.textContent=d.short;b.onclick=()=>{selectedDay=d.id;renderPlan();};el.dayTabs.appendChild(b);});
+    D.DAYS.forEach(d=>{
+      const dp=w.days[d.id];
+      const available=!!dp && dp.teamSize>0 && dp.playerIds.length>0;
+      const b=document.createElement("button");
+      b.type="button";
+      b.className="tab"+(d.id===selectedDay?" active":"")+(!available?" unavailable":"");
+      b.textContent=d.short;
+      b.disabled=!available;
+      if(available)b.onclick=()=>{selectedDay=d.id;renderPlan();};
+      el.dayTabs.appendChild(b);
+    });
     el.viewTabs.innerHTML="";
     ["MAP","TIMELINE"].forEach(v=>{const b=document.createElement("button");b.type="button";b.className="tab"+(v===selectedView?" active":"");b.textContent=v;b.onclick=()=>{selectedView=v;renderPlan();};el.viewTabs.appendChild(b);});
     el.planPreview.innerHTML=sheet(w,selectedDay,selectedView,false);
