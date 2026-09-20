@@ -962,10 +962,15 @@
   async function restorePlannerBackup(file) {
     try {
       const parsed=JSON.parse(await file.text());
-      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||!parsed?.state?.players||!parsed?.state?.weeks){
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
         throw new Error("Invalid backup");
       }
-      if(!confirm("This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?"))return;
+      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
+      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
+      const restoreMessage=
+        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
+        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+      if(!confirm(restoreMessage))return;
       state=parsed.state;
       state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
       selectedDay=D.DAYS[0].id;selectedView="MAP";
