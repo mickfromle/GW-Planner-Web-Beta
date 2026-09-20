@@ -670,16 +670,21 @@
         .map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks)
         .join(" / ")||"—";
       const color=colors.get(id)||"#373e42",code=p?playerCode(p):id.slice(0,3).toUpperCase();
-      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
+      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span>'+(p?'<img class="flag flag-small" src="'+esc(D.flagUrl(p.countryCode))+'" alt="">':'')+'<strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
     });
-    return out+'</tbody></table></div></div>';
+    out+='</tbody></table></div></div>';
+    out+=timelineView(w,dayId);
+    return out;
   }
   function phaseLabel(p) { return p==="OPENING"?"OPEN A/B":p==="PVP_SUPPORT"?"PVP SUPPORT":p==="PVP_CORE"?"PVP CORE / C":"FLEX"; }
   function timelineView(w,dayId) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),timeline=E.createTimeline(state.players,w,dayId),stack=E.createStackPlan(state.players,w,dayId);
     let out='<div class="section-title">TIMELINE</div><div class="timeline-list">';
-    timeline.forEach(x=>{out+='<div class="timeline-row"><div class="time">'+esc(x.localTimeLabel)+' · '+esc(x.utcTimeLabel)+'</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';});
+    timeline.forEach(x=>{
+      const p=players.get(x.playerId);
+      out+='<div class="timeline-row"><div class="timeline-player">'+(p?'<img class="flag flag-small" src="'+esc(D.flagUrl(p.countryCode))+'" alt="">':'')+'<strong>'+esc(p?.name||x.playerId)+'</strong></div><div class="time">'+esc(x.localTimeLabel)+'</div><div class="timeline-phase">'+esc(phaseLabel(x.phase))+' · '+esc(x.utcTimeLabel)+'</div></div>';
+    });
     out+='</div>';
     if(stack){
       out+='<div class="section-title">STACKING PLAN</div><div class="stack-list">';
@@ -709,9 +714,10 @@
     el.planTitle.textContent="Week "+w.week+" preview";
     el.dayTabs.innerHTML="";
     D.DAYS.forEach(d=>{const b=document.createElement("button");b.type="button";b.className="tab"+(d.id===selectedDay?" active":"");b.textContent=d.short;b.onclick=()=>{selectedDay=d.id;renderPlan();};el.dayTabs.appendChild(b);});
+    selectedView="MAP";
     el.viewTabs.innerHTML="";
-    ["MAP","TIMELINE"].forEach(v=>{const b=document.createElement("button");b.type="button";b.className="tab"+(v===selectedView?" active":"");b.textContent=v;b.onclick=()=>{selectedView=v;renderPlan();};el.viewTabs.appendChild(b);});
-    el.planPreview.innerHTML=sheet(w,selectedDay,selectedView,false);
+    el.viewTabs.classList.add("hidden");
+    el.planPreview.innerHTML=sheet(w,selectedDay,"MAP",false);
   }
 
   function openExport() {
