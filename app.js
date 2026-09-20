@@ -19,7 +19,9 @@
     playerDataDialog:byId("playerDataDialog"), downloadPlayerTemplateBtn:byId("downloadPlayerTemplateBtn"),
     importPlayersBtn:byId("importPlayersBtn"), createBackupBtn:byId("createBackupBtn"),
     restoreBackupBtn:byId("restoreBackupBtn"), playerWorkbookInput:byId("playerWorkbookInput"),
-    backupInput:byId("backupInput")
+    backupInput:byId("backupInput"), reviewDialog:byId("reviewDialog"),
+    reviewDialogTitle:byId("reviewDialogTitle"), reviewDialogMessage:byId("reviewDialogMessage"),
+    reviewCancelBtn:byId("reviewCancelBtn"), reviewConfirmBtn:byId("reviewConfirmBtn")
   };
 
   function normalizeShortCode(value) {
@@ -196,6 +198,29 @@
   let selectedView = "MAP";
   let shortCodeTouched = false;
   let toastTimer = null;
+  let reviewAction = null;
+
+  function showReview({
+    title,
+    message,
+    confirmLabel="OK",
+    cancelLabel="CANCEL",
+    showCancel=true,
+    onConfirm=null,
+  }) {
+    reviewAction=onConfirm;
+    el.reviewDialogTitle.textContent=title;
+    el.reviewDialogMessage.textContent=message;
+    el.reviewConfirmBtn.textContent=confirmLabel;
+    el.reviewCancelBtn.textContent=cancelLabel;
+    el.reviewCancelBtn.classList.toggle("hidden",!showCancel);
+    if(!el.reviewDialog.open)el.reviewDialog.showModal();
+  }
+
+  function closeReview() {
+    reviewAction=null;
+    if(el.reviewDialog.open)el.reviewDialog.close();
+  }
 
   function saveState() { localStorage.setItem(KEY, JSON.stringify(state)); }
   function ensureWeek(n) {
@@ -920,7 +945,15 @@
       const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
       const plan=importWorkbookRows(rows);
       if(!plan.parsed.length){
-        alert("No valid players were found.\n\n"+plan.warnings.slice(0,8).join("\n"));
+        const details=plan.warnings.length
+          ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
+          : "";
+        showReview({
+          title:"IMPORT PLAYERS",
+          message:"No valid players were found."+details,
+          confirmLabel:"OK",
+          showCancel:false,
+        });
         return;
       }
       const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
@@ -936,11 +969,30 @@
       if(plan.warnings.length)message+="\n\nWARNINGS\n"+plan.warnings.slice(0,6).map(x=>"• "+x).join("\n")+(plan.warnings.length>6?"\n… +"+(plan.warnings.length-6):"");
       message+="\n\nImport the valid rows now?";
 
-      if(confirm(message)){
-        applyWorkbookImport(plan);
-        toast("Player import completed.");
-        if(el.playerDataDialog.open)el.playerDataDialog.close();
-      }
+      showReview({
+        title:"IMPORT PLAYERS",
+        message,
+        confirmLabel:"IMPORT PLAYERS",
+        onConfirm:()=>{
+          applyWorkbookImport(plan);
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          const names=plan.parsed
+            .map(p=>p.name)
+            .sort((a,b)=>a.localeCompare(b));
+          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
+          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
+          if(names.length>14)result+="\n… +"+(names.length-14);
+          if(plan.warnings.length)result+="\n\n"+plan.warnings.length+" row(s) were skipped because of warnings.";
+
+          showReview({
+            title:"IMPORT COMPLETE",
+            message:result,
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
     } catch(err) {
       console.error(err);
       toast("The selected workbook could not be read.");
@@ -970,13 +1022,26 @@
       const restoreMessage=
         "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
         "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
-      if(!confirm(restoreMessage))return;
-      state=parsed.state;
-      state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
-      selectedDay=D.DAYS[0].id;selectedView="MAP";
-      saveState();renderAll();
-      toast("Planner backup restored.");
-      if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+      showReview({
+        title:"RESTORE BACKUP",
+        message:restoreMessage,
+        confirmLabel:"RESTORE BACKUP",
+        onConfirm:()=>{
+          state=parsed.state;
+          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+          selectedDay=D.DAYS[0].id;selectedView="MAP";
+          saveState();renderAll();
+          if(el.playerDataDialog.open)el.playerDataDialog.close();
+
+          showReview({
+            title:"BACKUP RESTORED",
+            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
+            confirmLabel:"OK",
+            showCancel:false,
+          });
+        },
+      });
     } catch(err) {
       console.error(err);
       toast("The selected backup could not be restored.");
@@ -995,6 +1060,13 @@
   el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
   el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
   document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  el.reviewCancelBtn.onclick=closeReview;
+  el.reviewConfirmBtn.onclick=()=>{
+    const action=reviewAction;
+    closeReview();
+    if(action)action();
+  };
   el.playerName.oninput=()=>{
     if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
   };
