@@ -591,15 +591,10 @@
       !linkedAccountIds.includes(existing.mainAccountId);
 
     const locationRequests=[...detachedSecondAccounts];
-    if(selfDetachedFromMain){
-      locationRequests.push({
-        ...existing,
-        name,
-        countryCode:el.playerCountry.value,
-        timeZoneId:el.playerTimeZone.value
-      });
-    }
 
+    // If the account being edited is detached from its main account,
+    // Player Edit already contains the user's chosen country/time zone.
+    // Only ask for accounts removed from another player's link group.
     const detachedLocations=locationRequests.length
       ? await requestDetachedAccountLocations(locationRequests)
       : new Map();
