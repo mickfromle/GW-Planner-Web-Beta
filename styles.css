@@ -696,6 +696,92 @@ select[size] { min-height: 180px; }
 .review-message strong {
   color: #fff;
 }
+.import-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.import-stat {
+  min-width: 0;
+  border: 1px solid #344149;
+  background: #11171a;
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.import-stat strong {
+  display: block;
+  font-size: 24px;
+  line-height: 1;
+  margin-bottom: 5px;
+}
+.import-stat span {
+  display: block;
+  color: #91a8b5;
+  font-size: 9px;
+  letter-spacing: .08em;
+  font-weight: 950;
+}
+.import-stat.good { border-color: #28693a; background: #101a13; }
+.import-stat.good strong { color: #4be06f; }
+.import-stat.info { border-color: #315872; background: #101820; }
+.import-stat.info strong { color: #65bdf0; }
+.import-stat.warn { border-color: #7b5c25; background: #1b160d; }
+.import-stat.warn strong { color: #f5bb4f; }
+.import-stat.quiet strong { color: #91a8b5; }
+.review-section {
+  margin-top: 10px;
+  border: 1px solid #344149;
+  background: #0f1417;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.review-section h3 {
+  margin: 0;
+  padding: 9px 11px;
+  background: #171d21;
+  border-bottom: 1px solid #2c383f;
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+.review-section.linked { border-color: #563943; }
+.review-section.linked h3 { background: #21151a; color: #ff9faa; }
+.review-section.warnings { border-color: #74551f; }
+.review-section.warnings h3 { background: #231a0c; color: #f5bb4f; }
+.review-list {
+  list-style: none;
+  margin: 0;
+  padding: 5px 10px 7px;
+}
+.review-list li {
+  display: grid;
+  grid-template-columns: 20px minmax(0,1fr);
+  gap: 6px;
+  align-items: start;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  overflow-wrap: anywhere;
+}
+.review-list li:last-child { border-bottom: 0; }
+.review-list li > span {
+  color: #ff5160;
+  font-weight: 950;
+  text-align: center;
+}
+.review-list .review-more {
+  color: #91a8b5;
+  font-style: italic;
+}
+.review-question {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border-left: 3px solid var(--red);
+  background: #171114;
+  color: #fff;
+  font-weight: 900;
+}
 .modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .grow { flex: 1 1 auto; }
 #linkedAccountsList {
