@@ -6,6 +6,7 @@ window.GWPlannerEngine = (() => {
   const BATTLE_DURATION_MINUTES = 22 * 60;
   const PVP_HANDOFF_TARGET_MINUTES = 4 * 60;
   const PVP_SUPPORT_TARGET_MINUTES = 3 * 60;
+  const C_UNLOCK_BUFFER_MINUTES = 30;
   // General rule for PvP and PvZ: one attack takes at most ~5 minutes.
   const ATTACK_DURATION_MINUTES = 5;
   const STEP_MINUTES = ATTACK_DURATION_MINUTES;
@@ -506,7 +507,7 @@ window.GWPlannerEngine = (() => {
     const byId = new Map(players.map(p => [p.id,p]));
     const loads = new Map(createAttackLoads(players,dayPlan,weekPlan,dayId).map(x => [x.playerId,x]));
 
-    const entries = dayPlan.playerIds.map(playerId => {
+    const drafts = dayPlan.playerIds.map(playerId => {
       const player = byId.get(playerId);
       if (!player) return null;
       const load = loads.get(playerId);
@@ -514,18 +515,42 @@ window.GWPlannerEngine = (() => {
       if ((dayPlan.pvpCorePlayerIds || []).includes(playerId)) phase = "PVP_CORE";
       else if ((load?.pvpAttacks || 0) > 0) phase = "PVP_SUPPORT";
       else if ((load?.pvzAttacks || 0) > 0) phase = "OPENING";
-      const target = phase === "PVP_CORE" ? PVP_HANDOFF_TARGET_MINUTES :
-        phase === "PVP_SUPPORT" ? PVP_SUPPORT_TARGET_MINUTES : 0;
-      const offset = earliestPreferredOffset(player,weekPlan,dayId,target)
-        ?? earliestPreferredOffset(player,weekPlan,dayId,0);
-      if (offset === null) return null;
       return {
         playerId,
+        player,
         phase,
-        suggestedOffsetMinutes:offset,
-        localTimeLabel:localTimeLabel(player,weekPlan,dayId,offset),
-        utcTimeLabel:utcTimeLabel(weekPlan,dayId,offset),
         needsStacking:(load?.spareAttacks || 0) > 0,
+      };
+    }).filter(Boolean);
+
+    const openingOffsets = drafts
+      .filter(x => x.phase === "OPENING")
+      .map(x => earliestPreferredOffset(x.player,weekPlan,dayId,0))
+      .filter(x => x !== null);
+
+    const lastOpening = openingOffsets.length ? Math.max(...openingOffsets) : null;
+    const cUnlockTarget = Math.max(
+      PVP_HANDOFF_TARGET_MINUTES,
+      (lastOpening ?? PVP_HANDOFF_TARGET_MINUTES) + (lastOpening === null ? 0 : C_UNLOCK_BUFFER_MINUTES)
+    );
+
+    const entries = drafts.map(draft => {
+      const target = draft.phase === "PVP_CORE" ? cUnlockTarget :
+        draft.phase === "PVP_SUPPORT" ? PVP_SUPPORT_TARGET_MINUTES : 0;
+
+      const offset = draft.phase === "PVP_CORE"
+        ? earliestPreferredOffset(draft.player,weekPlan,dayId,target)
+        : (earliestPreferredOffset(draft.player,weekPlan,dayId,target)
+          ?? earliestPreferredOffset(draft.player,weekPlan,dayId,0));
+
+      if (offset === null) return null;
+      return {
+        playerId:draft.playerId,
+        phase:draft.phase,
+        suggestedOffsetMinutes:offset,
+        localTimeLabel:localTimeLabel(draft.player,weekPlan,dayId,offset),
+        utcTimeLabel:utcTimeLabel(weekPlan,dayId,offset),
+        needsStacking:draft.needsStacking,
       };
     }).filter(Boolean);
 
