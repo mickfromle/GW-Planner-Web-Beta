@@ -173,6 +173,10 @@
       player.linkedAccountIds=Array.isArray(player.linkedAccountIds)
         ? [...new Set(player.linkedAccountIds.filter(Boolean))]
         : [];
+      player.accountType=player.accountType==="SECOND"?"SECOND":"MAIN";
+      player.mainAccountId=player.accountType==="SECOND" && player.mainAccountId
+        ? player.mainAccountId
+        : null;
     });
 
     // Normalize linked accounts into symmetric owner groups.
@@ -666,7 +670,7 @@
     const timeline=new Map(E.createTimeline(state.players,w,dayId).map(x=>[x.playerId,x]));
     const canonicalPair=stack?.assignments?.[0] || null;
 
-    let out='<div class="assignments-block combined-details"><div class="section-title assignments-title"><span>PLAYER DETAILS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table combined-table"><thead><tr><th>PLAYER</th><th>LOCAL TIME / TASK</th><th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
+    let out='<div class="assignments-block combined-details"><div class="section-title assignments-title"><span>PLAYER ASSIGNMENTS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table combined-table"><thead><tr><th>PLAYER</th><th>LOCAL TIME / TASK</th><th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
     dp.playerIds.forEach(id=>{
       const p=players.get(id),l=loads.get(id),t=timeline.get(id);
       const stackRows=(stack?stack.assignments:[]).filter(x=>x.sparePlayerId===id||x.partnerPlayerId===id);
@@ -682,7 +686,13 @@
       }
       const timeTask=t ? t.localTimeLabel+" · "+phaseLabel(t.phase) : "—";
       const color=colors.get(id)||"#373e42",code=p?playerCode(p):id.slice(0,3).toUpperCase();
-      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span>'+(p?'<img class="flag flag-small" src="'+esc(D.flagUrl(p.countryCode))+'" alt="">':'')+'<strong>'+esc(p?p.name:id)+'</strong></div></td><td class="local-task">'+esc(timeTask)+'</td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
+      const playedBy=p?.accountType==="SECOND" && p?.mainAccountId
+        ? (players.get(p.mainAccountId)?.name || "")
+        : "";
+      const ownerLine=playedBy
+        ? '<small class="played-by">played by '+esc(playedBy)+'</small>'
+        : '';
+      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span>'+(p?'<img class="flag flag-small" src="'+esc(D.flagUrl(p.countryCode))+'" alt="">':'')+'<span class="player-assignment-name"><strong>'+esc(p?p.name:id)+'</strong>'+ownerLine+'</span></div></td><td class="local-task">'+esc(timeTask)+'</td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
     });
     out+='</tbody></table></div></div>';
     return out;
