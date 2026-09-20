@@ -663,17 +663,28 @@
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),colors=colorMap(w,dayId);
     const stack=E.createStackPlan(state.players,w,dayId),vp=E.playerVpTargets(state.players,w,dayId);
-    let out='<div class="assignments-block"><div class="section-title assignments-title"><span>PLAYER ASSIGNMENTS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table"><thead><tr><th>PLAYER</th><th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
+    const timeline=new Map(E.createTimeline(state.players,w,dayId).map(x=>[x.playerId,x]));
+    const canonicalPair=stack?.assignments?.[0] || null;
+
+    let out='<div class="assignments-block combined-details"><div class="section-title assignments-title"><span>PLAYER DETAILS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table combined-table"><thead><tr><th>PLAYER</th><th>LOCAL TIME / TASK</th><th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
     dp.playerIds.forEach(id=>{
-      const p=players.get(id),l=loads.get(id),stacks=(stack?stack.assignments:[])
-        .filter(x=>x.sparePlayerId===id||(x.partnerPlayerId===id&&(l?.spareAttacks||0)>0))
-        .map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks)
-        .join(" / ")||"—";
+      const p=players.get(id),l=loads.get(id),t=timeline.get(id);
+      const stackRows=(stack?stack.assignments:[]).filter(x=>x.sparePlayerId===id||x.partnerPlayerId===id);
+      let stacks="—";
+      if(stackRows.length){
+        stacks=stackRows.map(x=>{
+          const firstId=canonicalPair?.sparePlayerId || x.sparePlayerId;
+          const secondId=canonicalPair?.partnerPlayerId || x.partnerPlayerId;
+          const firstName=(players.get(firstId)||{}).name||firstId;
+          const secondName=(players.get(secondId)||{}).name||secondId;
+          return x.targetSector+" x"+x.spareAttacks+" · "+x.utcTime+" · "+firstName+" + "+secondName;
+        }).filter((v,i,a)=>a.indexOf(v)===i).join(" / ");
+      }
+      const timeTask=t ? t.localTimeLabel+" · "+phaseLabel(t.phase) : "—";
       const color=colors.get(id)||"#373e42",code=p?playerCode(p):id.slice(0,3).toUpperCase();
-      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span>'+(p?'<img class="flag flag-small" src="'+esc(D.flagUrl(p.countryCode))+'" alt="">':'')+'<strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
+      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span>'+(p?'<img class="flag flag-small" src="'+esc(D.flagUrl(p.countryCode))+'" alt="">':'')+'<strong>'+esc(p?p.name:id)+'</strong></div></td><td class="local-task">'+esc(timeTask)+'</td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
     });
     out+='</tbody></table></div></div>';
-    out+=timelineView(w,dayId);
     return out;
   }
   function phaseLabel(p) { return p==="OPENING"?"OPEN A/B":p==="PVP_SUPPORT"?"PVP SUPPORT":p==="PVP_CORE"?"PVP CORE / C":"FLEX"; }
