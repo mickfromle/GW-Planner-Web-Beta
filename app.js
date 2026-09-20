@@ -203,6 +203,7 @@
   function showReview({
     title,
     message,
+    html=false,
     confirmLabel="OK",
     cancelLabel="CANCEL",
     showCancel=true,
@@ -210,7 +211,8 @@
   }) {
     reviewAction=onConfirm;
     el.reviewDialogTitle.textContent=title;
-    el.reviewDialogMessage.textContent=message;
+    if(html) el.reviewDialogMessage.innerHTML=message;
+    else el.reviewDialogMessage.textContent=message;
     el.reviewConfirmBtn.textContent=confirmLabel;
     el.reviewCancelBtn.textContent=cancelLabel;
     el.reviewCancelBtn.classList.toggle("hidden",!showCancel);
@@ -991,16 +993,38 @@
         .filter(p=>p.linkedNames.length)
         .map(p=>p.name+" → "+p.linkedNames.join(", "));
 
-      let message=plan.newCount+" new · "+plan.updateCount+" updates · "+plan.warnings.length+" warnings";
-      if(newNames.length)message+="\n\nNEW\n"+newNames.slice(0,10).map(x=>"• "+x).join("\n")+(newNames.length>10?"\n… +"+(newNames.length-10):"");
-      if(updateNames.length)message+="\n\nUPDATE\n"+updateNames.slice(0,10).map(x=>"• "+x).join("\n")+(updateNames.length>10?"\n… +"+(updateNames.length-10):"");
-      if(links.length)message+="\n\nLINKED ACCOUNTS\n"+links.slice(0,8).map(x=>"• "+x).join("\n")+(links.length>8?"\n… +"+(links.length-8):"");
-      if(plan.warnings.length)message+="\n\nWARNINGS\n"+plan.warnings.slice(0,6).map(x=>"• "+x).join("\n")+(plan.warnings.length>6?"\n… +"+(plan.warnings.length-6):"");
-      message+="\n\nImport the valid rows now?";
+      const listHtml=(items,limit,icon="•")=>{
+        if(!items.length)return "";
+        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
+        const more=items.length>limit
+          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
+          : "";
+        return "<ul class=\"review-list\">"+shown+more+"</ul>";
+      };
+      const message=
+        "<div class=\"import-summary-grid\">"+
+          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
+          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
+          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
+        "</div>"+
+        (newNames.length
+          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
+          : "")+
+        (updateNames.length
+          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
+          : "")+
+        (links.length
+          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
+          : "")+
+        (plan.warnings.length
+          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
+          : "")+
+        "<div class=\"review-question\">Import the valid rows now?</div>";
 
       showReview({
         title:"IMPORT PLAYERS",
         message,
+        html:true,
         confirmLabel:"IMPORT PLAYERS",
         onConfirm:()=>{
           applyWorkbookImport(plan);
