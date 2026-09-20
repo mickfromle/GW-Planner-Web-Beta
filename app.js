@@ -417,7 +417,7 @@
     const inheritedMainId=
       current?.accountType==="SECOND" &&
       current?.mainAccountId &&
-      (requested.has(current.mainAccountId)||previousGroup.has(current.mainAccountId))
+      requested.has(current.mainAccountId)
         ? current.mainAccountId
         : null;
     const mainId=requested.size ? (inheritedMainId || playerId) : null;
@@ -582,8 +582,26 @@
       .filter(linkedId=>!linkedAccountIds.includes(linkedId))
       .map(linkedId=>state.players.find(x=>x.id===linkedId))
       .filter(account=>account && account.accountType==="SECOND" && account.mainAccountId===id);
-    const detachedLocations=detachedSecondAccounts.length
-      ? await requestDetachedAccountLocations(detachedSecondAccounts)
+
+    const selfDetachedFromMain=
+      !!existing &&
+      existing.accountType==="SECOND" &&
+      !!existing.mainAccountId &&
+      previousLinkedIds.includes(existing.mainAccountId) &&
+      !linkedAccountIds.includes(existing.mainAccountId);
+
+    const locationRequests=[...detachedSecondAccounts];
+    if(selfDetachedFromMain){
+      locationRequests.push({
+        ...existing,
+        name,
+        countryCode:el.playerCountry.value,
+        timeZoneId:el.playerTimeZone.value
+      });
+    }
+
+    const detachedLocations=locationRequests.length
+      ? await requestDetachedAccountLocations(locationRequests)
       : new Map();
     if(detachedLocations===null)return;
 
@@ -591,8 +609,8 @@
       pvpStars:role==="PVZ"?null:Number(el.playerStars.value),preferredStartMinutes:Number(el.playStart.value),
       preferredEndMinutes:Number(el.playEnd.value),preferredSpare:doubleAttackPreference==="PREFERRED",
       doubleAttackPreference,
-      accountType:existing?.accountType||"MAIN",
-      mainAccountId:existing?.mainAccountId||null,
+      accountType:selfDetachedFromMain?"MAIN":(existing?.accountType||"MAIN"),
+      mainAccountId:selfDetachedFromMain?null:(existing?.mainAccountId||null),
       linkedAccountIds};
     const i=state.players.findIndex(x=>x.id===id); if (i>=0) state.players[i]=p; else state.players.push(p);
     applyLinkedAccountGroup(id,linkedAccountIds,previousLinkedIds);
