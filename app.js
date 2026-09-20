@@ -297,6 +297,7 @@
   function renderPlayers() {
     const w=week();
     const players=[...state.players].sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:"base"}));
+    const playersById=new Map(players.map(p=>[p.id,p]));
     el.playerCount.textContent=players.length+" / 20 players";
     el.playerList.innerHTML="";
     if (!players.length) {
@@ -307,8 +308,19 @@
       const row=document.createElement("div"); row.className="player-row";
       const main=document.createElement("div"); main.className="player-main";
       const stars=p.role!=="PVZ" ? " · "+"★".repeat(p.pvpStars || 3) : "";
-      const spare=p.doubleAttackPreference==="PREFERRED" ? " · DOUBLE" : "";
-      main.innerHTML='<img class="flag" src="'+esc(D.flagUrl(p.countryCode))+'" alt=""><div><div class="player-name">'+esc(p.name)+'</div><div class="player-meta"><span class="roster-code" style="background:'+playerColor(p)+';color:'+contrast(playerColor(p))+'">'+esc(playerCode(p))+'</span> · '+esc(roleLabel(p.role))+stars+spare+'</div></div>';
+      const spare=p.doubleAttackPreference==="PREFERRED"
+        ? " · DOUBLE"
+        : p.doubleAttackPreference==="DO_NOT_USE"
+          ? " · NO DOUBLE"
+          : "";
+      const linkedNames=(p.linkedAccountIds||[])
+        .map(id=>playersById.get(id)?.name)
+        .filter(Boolean)
+        .sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}));
+      const linkedLine=linkedNames.length
+        ? '<div class="player-linked">LINKED · '+esc(linkedNames.join(", "))+'</div>'
+        : "";
+      main.innerHTML='<img class="flag" src="'+esc(D.flagUrl(p.countryCode))+'" alt=""><div><div class="player-name">'+esc(p.name)+'</div><div class="player-meta"><span class="roster-code" style="background:'+playerColor(p)+';color:'+contrast(playerColor(p))+'">'+esc(playerCode(p))+'</span> · '+esc(roleLabel(p.role))+stars+spare+'</div>'+linkedLine+'</div>';
       main.onclick=()=>openPlayer(p.id);
       const edit=document.createElement("button"); edit.type="button"; edit.className="btn btn-secondary"; edit.textContent="EDIT"; edit.onclick=()=>openPlayer(p.id);
       const avail=document.createElement("div"); avail.className="availability";
