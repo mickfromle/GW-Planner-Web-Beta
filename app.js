@@ -10,13 +10,121 @@
     planTitle:byId("planTitle"), dayTabs:byId("dayTabs"), viewTabs:byId("viewTabs"),
     planPreview:byId("planPreview"), exportBtn:byId("exportBtn"), playerDialog:byId("playerDialog"),
     playerForm:byId("playerForm"), playerDialogTitle:byId("playerDialogTitle"), playerId:byId("playerId"),
-    playerName:byId("playerName"), countrySearch:byId("countrySearch"), playerCountry:byId("playerCountry"),
+    playerName:byId("playerName"), playerShortCode:byId("playerShortCode"), playerColor:byId("playerColor"), playerColorPalette:byId("playerColorPalette"), countrySearch:byId("countrySearch"), playerCountry:byId("playerCountry"),
     timeZoneField:byId("timeZoneField"), playerTimeZone:byId("playerTimeZone"), playerRole:byId("playerRole"),
     playerStars:byId("playerStars"), starsField:byId("starsField"), playStart:byId("playStart"),
     playEnd:byId("playEnd"), spareToggle:byId("spareToggle"), deletePlayerBtn:byId("deletePlayerBtn"),
     exportDialog:byId("exportDialog"), exportForm:byId("exportForm"), exportRange:byId("exportRange"),
     exportStatus:byId("exportStatus"), toast:byId("toast"), captureRoot:byId("captureRoot")
   };
+
+  function normalizeShortCode(value) {
+    return [...String(value || "").trim().toUpperCase()]
+      .filter(ch=>/[\p{L}\p{N}]/u.test(ch))
+      .slice(0,3)
+      .join("");
+  }
+  function defaultShortCode(name) {
+    const parts=String(name || "").trim().split(/\s+/)
+      .map(part=>[...part].filter(ch=>/[\p{L}\p{N}]/u.test(ch)).join(""))
+      .filter(Boolean);
+    if(!parts.length) return "";
+    const raw=parts.length>=2
+      ? parts.slice(0,3).map(part=>[...part].find(ch=>/\p{L}/u.test(ch)) || [...part][0]).join("")
+      : [...parts[0]].slice(0,2).join("");
+    return normalizeShortCode(raw);
+  }
+  function uniqueShortCode(name, preferred, used) {
+    const compact=[...String(name || "").toUpperCase()]
+      .filter(ch=>/[\p{L}\p{N}]/u.test(ch)).join("");
+    const base=defaultShortCode(name) || "P";
+    const candidates=[
+      normalizeShortCode(preferred),
+      base,
+      normalizeShortCode(compact.slice(0,3)),
+      compact.length>=2 ? normalizeShortCode(compact[0]+compact[compact.length-1]) : "",
+      compact.length>=3 ? normalizeShortCode(compact[0]+compact[1]+compact[compact.length-1]) : ""
+    ].filter(Boolean);
+    for(const code of [...new Set(candidates)]) {
+      if(!used.has(code.toUpperCase())) return code;
+    }
+    for(let i=1;i<=99;i++) {
+      const code=normalizeShortCode(base.slice(0,1)+String(i).padStart(2,"0"));
+      if(!used.has(code.toUpperCase())) return code;
+    }
+    return base;
+  }
+  function playerCode(player) {
+    return normalizeShortCode(player && player.shortCode) ||
+      defaultShortCode(player && player.name) ||
+      "P";
+  }
+  function suggestShortCode(name, excludingId) {
+    const used=new Set(state.players
+      .filter(p=>p.id!==excludingId)
+      .map(p=>playerCode(p).toUpperCase()));
+    return uniqueShortCode(name,"",used);
+  }
+
+  function normalizeColorHex(value) {
+    const text=String(value || "").trim().toUpperCase();
+    return /^#[0-9A-F]{6}$/.test(text) ? text : "";
+  }
+  function uniquePlayerColor(preferred, used) {
+    const normalized=normalizeColorHex(preferred);
+    if(normalized && !used.has(normalized)) return normalized;
+    return D.PLAYER_COLORS
+      .map(x=>x.toUpperCase())
+      .find(x=>!used.has(x)) || D.PLAYER_COLORS[0].toUpperCase();
+  }
+  function playerColor(player) {
+    return normalizeColorHex(player && player.colorHex) ||
+      D.PLAYER_COLORS[0].toUpperCase();
+  }
+  function suggestPlayerColor(excludingId) {
+    const used=new Set(state.players
+      .filter(p=>p.id!==excludingId)
+      .map(p=>playerColor(p)));
+    return uniquePlayerColor("",used);
+  }
+
+  function renderPlayerColorPalette(excludingId) {
+    const currentWeek=week();
+    const sharedPlayerIds=new Set();
+    if(excludingId) {
+      D.DAYS.forEach(day=>{
+        const dp=currentWeek.days[day.id];
+        if(dp.playerIds.includes(excludingId)) {
+          dp.playerIds.forEach(id=>{ if(id!==excludingId) sharedPlayerIds.add(id); });
+        }
+      });
+    }
+
+    const used=new Set(state.players
+      .filter(p=>sharedPlayerIds.has(p.id))
+      .map(p=>playerColor(p)));
+    const current=normalizeColorHex(el.playerColor.value) || suggestPlayerColor(excludingId);
+    const available=D.PLAYER_COLORS
+      .map(x=>x.toUpperCase())
+      .filter(x=>x===current || !used.has(x));
+
+    if(!available.includes(current)) available.unshift(current);
+    el.playerColorPalette.innerHTML="";
+    available.forEach(hex=>{
+      const swatch=document.createElement("button");
+      swatch.type="button";
+      swatch.className="player-color-swatch"+(hex===normalizeColorHex(el.playerColor.value)?" selected":"");
+      swatch.style.background=hex;
+      swatch.style.color=contrast(hex);
+      swatch.textContent=hex===normalizeColorHex(el.playerColor.value)?"✓":"";
+      swatch.setAttribute("aria-label","Select "+hex);
+      swatch.onclick=()=>{
+        el.playerColor.value=hex.toLowerCase();
+        renderPlayerColorPalette(excludingId);
+      };
+      el.playerColorPalette.appendChild(swatch);
+    });
+  }
 
   function freshState() {
     return { version:1, selectedWeek:1, players:[], weeks:{ "1":E.emptyWeek(1) } };
@@ -30,10 +138,20 @@
   }
 
   let state = loadState();
+  {
+    const usedCodes=new Set();
+    state.players.forEach((player,index)=>{
+      player.shortCode=uniqueShortCode(player.name,player.shortCode,usedCodes);
+      usedCodes.add(player.shortCode.toUpperCase());
+      player.colorHex=normalizeColorHex(player.colorHex) ||
+        D.PLAYER_COLORS[index % D.PLAYER_COLORS.length].toUpperCase();
+    });
+  }
   state.selectedWeek = Math.max(1, Math.min(4, state.selectedWeek || 1));
   let selectedDay = D.DAYS[0].id;
   let selectedView = "MAP";
   let editingSpare = false;
+  let shortCodeTouched = false;
   let toastTimer = null;
 
   function saveState() { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -122,7 +240,7 @@
       const main=document.createElement("div"); main.className="player-main";
       const stars=p.role!=="PVZ" ? " · "+"★".repeat(p.pvpStars || 3) : "";
       const spare=p.preferredSpare ? " · SPARE" : "";
-      main.innerHTML='<img class="flag" src="'+esc(D.flagUrl(p.countryCode))+'" alt=""><div><div class="player-name">'+esc(p.name)+'</div><div class="player-meta">'+esc(roleLabel(p.role))+stars+spare+'</div></div>';
+      main.innerHTML='<img class="flag" src="'+esc(D.flagUrl(p.countryCode))+'" alt=""><div><div class="player-name">'+esc(p.name)+'</div><div class="player-meta"><span class="roster-code" style="background:'+playerColor(p)+';color:'+contrast(playerColor(p))+'">'+esc(playerCode(p))+'</span> · '+esc(roleLabel(p.role))+stars+spare+'</div></div>';
       main.onclick=()=>openPlayer(p.id);
       const edit=document.createElement("button"); edit.type="button"; edit.className="btn btn-secondary"; edit.textContent="EDIT"; edit.onclick=()=>openPlayer(p.id);
       const avail=document.createElement("div"); avail.className="availability";
@@ -171,11 +289,13 @@
   }
   function updateSpare() {
     el.spareToggle.classList.toggle("on",editingSpare);
-    el.spareToggle.textContent=editingSpare?"✓ PREFERRED FOR SPARE":"NOT PREFERRED FOR SPARE";
+    el.spareToggle.textContent=editingSpare?"✓ PREFERRED FOR DOUBLE ATTACKS":"NOT PREFERRED FOR DOUBLE ATTACKS";
   }
   function openPlayer(id) {
     const p=id ? state.players.find(x=>x.id===id) : null;
     el.playerDialogTitle.textContent=p?"Edit player":"Add player"; el.playerId.value=p?p.id:""; el.playerName.value=p?p.name:"";
+    el.playerShortCode.value=p?playerCode(p):""; shortCodeTouched=!!p;
+    el.playerColor.value=(p?playerColor(p):suggestPlayerColor(null)).toLowerCase();
     el.countrySearch.value=""; const country=p?p.countryCode:"DE"; populateCountries("",country); populateZones(country,p?p.timeZoneId:null,false);
     el.playerRole.value=p?p.role:"PVZ"; el.playerStars.value=String(p && p.pvpStars ? p.pvpStars : 3);
     el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ"); editingSpare=!!(p&&p.preferredSpare); updateSpare();
@@ -188,8 +308,11 @@
     const id=el.playerId.value || (crypto.randomUUID ? crypto.randomUUID() : "p"+Date.now());
     const name=el.playerName.value.trim(); if (!name) return;
     if (state.players.some(p=>p.id!==id && p.name.trim().toLowerCase()===name.toLowerCase())) return toast("A player with this name already exists.");
+    const shortCode=normalizeShortCode(el.playerShortCode.value) || suggestShortCode(name,id);
+    if (state.players.some(p=>p.id!==id && playerCode(p).toLowerCase()===shortCode.toLowerCase())) return toast("This short code is already used by another player.");
+    const colorHex=normalizeColorHex(el.playerColor.value) || suggestPlayerColor(id);
     const role=el.playerRole.value;
-    const p={id,name,countryCode:el.playerCountry.value,timeZoneId:el.playerTimeZone.value,role,
+    const p={id,name,shortCode,colorHex,countryCode:el.playerCountry.value,timeZoneId:el.playerTimeZone.value,role,
       pvpStars:role==="PVZ"?null:Number(el.playerStars.value),preferredStartMinutes:Number(el.playStart.value),
       preferredEndMinutes:Number(el.playEnd.value),preferredSpare:editingSpare};
     const i=state.players.findIndex(x=>x.id===id); if (i>=0) state.players[i]=p; else state.players.push(p);
@@ -219,82 +342,174 @@
   function createPlan() {
     saveSetup(false);
     if (!state.players.length) return toast("Add players first.");
-    const result=E.autoPlan(state.players,week());
-    if (!result.success) return toast(failureText(result.failure));
-    state.weeks[String(state.selectedWeek)]=result.plan; saveState();
-    const first=D.DAYS.find(d=>result.plan.days[d.id].teamSize>0); selectedDay=first?first.id:D.DAYS[0].id; selectedView="MAP";
-    renderPlan(); el.planSection.scrollIntoView({behavior:"smooth",block:"start"}); toast("GW plan created.");
+
+    const weekNumber=state.selectedWeek;
+    const current=week();
+    const hadAssignments=D.DAYS.some(d=>current.days[d.id].playerIds.length>0);
+    const before=JSON.stringify(current);
+
+    el.autoPlanBtn.disabled=true;
+    el.autoPlanBtn.textContent="RECALCULATING…";
+
+    setTimeout(()=>{
+      const result=E.autoPlan(state.players,current);
+      el.autoPlanBtn.disabled=false;
+
+      if (!result.success) {
+        renderPlan();
+        return toast(failureText(result.failure));
+      }
+
+      const unchanged=hadAssignments && before===JSON.stringify(result.plan);
+      state.weeks[String(weekNumber)]=result.plan; saveState();
+
+      const first=D.DAYS.find(d=>result.plan.days[d.id].teamSize>0);
+      selectedDay=first?first.id:D.DAYS[0].id;
+      selectedView="MAP";
+
+      renderPlan();
+      el.planSection.scrollIntoView({behavior:"smooth",block:"start"});
+
+      if (!hadAssignments) toast("Week "+weekNumber+" planned.");
+      else if (unchanged) toast("Week "+weekNumber+" recalculated · no changes needed.");
+      else toast("Week "+weekNumber+" recalculated · plan updated.");
+    },80);
   }
 
-  function colorMap(w) {
-    const ids=[]; D.DAYS.forEach(d=>w.days[d.id].playerIds.forEach(id=>{if(!ids.includes(id))ids.push(id);}));
-    return new Map(ids.map((id,i)=>[id,D.PLAYER_COLORS[i%D.PLAYER_COLORS.length]]));
+  function colorMap(w,dayId) {
+    const ids=[...(w.days[dayId]?.playerIds || [])];
+    const players=new Map(state.players.map(p=>[p.id,p]));
+    const candidates=D.PLAYER_COLORS
+      .slice(0,Math.min(ids.length,D.PLAYER_COLORS.length))
+      .map(x=>x.toUpperCase());
+    const result=new Map();
+
+    ids.forEach(id=>{
+      const preferred=players.has(id) ? playerColor(players.get(id)) : "";
+      const idx=candidates.indexOf(preferred);
+      if(idx>=0) {
+        result.set(id,preferred);
+        candidates.splice(idx,1);
+      }
+    });
+
+    ids.forEach(id=>{
+      if(result.has(id)) return;
+      const next=candidates.length
+        ? candidates.shift()
+        : D.PLAYER_COLORS[result.size%D.PLAYER_COLORS.length].toUpperCase();
+      result.set(id,next);
+    });
+    return result;
   }
   function contrast(hex) {
     const s=hex.replace("#",""),r=parseInt(s.slice(0,2),16),g=parseInt(s.slice(2,4),16),b=parseInt(s.slice(4,6),16);
     return (.299*r+.587*g+.114*b)>150?"#141719":"#fff";
   }
   function sheetHeader(w,dayId) {
-    const d=D.DAYS.find(x=>x.id===dayId),dp=w.days[dayId],end=E.addDaysIso(w.weekStart,5),date=E.dateForDay(w,dayId);
-    return '<div class="sheet-header"><div class="sheet-brand">GW TACTICS<small>GUILD WAR PLANNER</small></div><div class="sheet-week"><strong>WEEK '+w.week+'</strong><span>'+esc(w.weekStart)+' – '+esc(end)+'</span></div></div>'+
-      '<div class="day-head"><h3>'+esc(d.label)+' · '+esc(date)+'</h3><div class="right"><strong>'+(dp.teamSize===0?"BREAK":dp.teamSize+"v"+dp.teamSize)+'</strong><span class="ready">'+(dp.teamSize===0?"":"READY")+'</span></div></div>';
+    const d=D.DAYS.find(x=>x.id===dayId),end=E.addDaysIso(w.weekStart,5);
+    return '<div class="sheet-header">'+
+      '<div class="sheet-brand">GW TACTICS<small>GUILD WAR PLANNER</small></div>'+
+      '<div class="sheet-day">'+esc(d.label)+'</div>'+
+      '<div class="sheet-week"><strong>WEEK '+w.week+'</strong><span>'+esc(w.weekStart)+' – '+esc(end)+'</span></div>'+
+      '</div>';
   }
   function mapView(w,dayId) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
-    const load=D.MISSION_LOADS[dp.teamSize],islands=E.createIslandAssignments(state.players,w,dayId),colors=colorMap(w),players=new Map(state.players.map(p=>[p.id,p]));
-    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+load.pvpAttacks+'</strong><span>PVP</span></div><div class="metric"><strong>'+load.pvzAttacks+'</strong><span>PVZ</span></div><div class="metric"><strong>'+load.spareAttacks+'</strong><span>SPARE</span></div></div>';
-    out+='<div class="sector-plan">MAX: '+esc(load.maxSectorPlan)+'</div><div class="section-title">ISLAND ASSIGNMENTS</div><div class="legend">PvZ · H = PvP · MAX = highest-value PvZ</div><div class="island-grid">';
+    const load=D.MISSION_LOADS[dp.teamSize],islands=E.createIslandAssignments(state.players,w,dayId),colors=colorMap(w,dayId),players=new Map(state.players.map(p=>[p.id,p])),stack=E.createStackPlan(state.players,w,dayId);
+    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+load.pvpAttacks+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+load.pvzAttacks+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+load.spareAttacks+'</strong><span>STACK ATTACKS</span></div></div>';
+    out+='<div class="sector-plan"><div><span>SECTOR PLAN</span><strong>'+esc(load.maxSectorPlan)+'</strong></div><div class="sector-score">MAX VP '+load.maxVp+' <b>·</b> SECTOR SCORE '+load.maxSectorScore+'</div></div><div class="section-title section-title-line"><span>ISLAND ASSIGNMENTS</span></div>';
+    const islandNumbers=[...new Set(islands.map(island=>Number(String(island.island).slice(0,-1))))].sort((a,b)=>a-b);
+    out+='<div class="island-grid" style="--island-groups:'+Math.max(1,islandNumbers.length)+'">';
     islands.forEach(island=>{
-      out+='<div class="island-card"><div class="island-name">'+esc(island.island)+'</div><div class="mission-grid" style="grid-template-columns:repeat('+island.columns+',1fr)">';
+      const number=Number(String(island.island).slice(0,-1));
+      const sector=String(island.island).slice(-1);
+      const groupColumn=Math.max(0,islandNumbers.indexOf(number))+1;
+      const sectorRow=sector==="A"?1:sector==="B"?2:sector==="C"?3:sector==="D"?4:1;
+      out+='<div class="island-card" style="grid-column:'+groupColumn+';grid-row:'+sectorRow+'"><div class="island-name">'+esc(island.island)+'</div><div class="mission-grid">';
       island.missions.forEach(m=>{
-        const p=players.get(m.playerId),bg=m.active?(colors.get(m.playerId)||"#373e42"):"#1c2124";
-        const label=!m.active?"—":m.kind==="PVP"?"H":m.isMaxPvz?"MAX":"PvZ";
-        const lc=!m.active?"#2d3235":m.kind==="PVP"?"#e0c64f":"#c6d0d5";
-        out+='<div class="mission-cell '+(m.active?"":"inactive")+' '+(m.isMaxPvz&&m.active?"max":"")+'"><div class="mission-label" style="background:'+lc+'">'+label+'</div><div class="mission-player" style="background:'+bg+';color:'+contrast(bg)+'">'+(m.active?esc(p?p.name:"—"):"")+'</div></div>';
+        const doubleAssignment=m.active&&m.isMaxPvz&&stack
+          ? stack.assignments.find(x=>x.targetSector===island.island&&x.targetMissionLevel===m.missionLevel)
+          : null;
+        const p=players.get(m.playerId);
+        let bg=m.active?(colors.get(m.playerId)||"#373e42"):"#1c2124";
+        let text=m.active?esc(p?playerCode(p):"—"):"";
+        let textColor=m.active?contrast(bg):"#8fa0a8";
+        const label=!m.active?"—":doubleAssignment?"DOUBLE":m.kind==="PVP"?"PvP":String(m.missionLevel??"PvZ");
+        const lc=!m.active?"#2d3235":"#c6d0d5";
+        if(doubleAssignment){
+          const canonical=stack.assignments[0]||doubleAssignment;
+          const firstPlayer=players.get(canonical.sparePlayerId);
+          const secondPlayer=players.get(canonical.partnerPlayerId);
+          const first=firstPlayer?playerCode(firstPlayer):canonical.sparePlayerId.slice(0,3).toUpperCase();
+          const second=secondPlayer?playerCode(secondPlayer):canonical.partnerPlayerId.slice(0,3).toUpperCase();
+          const firstColor=colors.get(canonical.sparePlayerId)||"#373e42";
+          const secondColor=colors.get(canonical.partnerPlayerId)||"#373e42";
+          bg='linear-gradient(180deg,'+firstColor+' 0 50%,'+secondColor+' 50% 100%)';
+          text='<span>'+esc(first)+'</span><span>'+esc(second)+'</span>';
+          textColor="#fff";
+        }
+        const offset=island.columns===4?1:0;
+        const gridColumn=m.column+1+offset;
+        const gridRow=m.row+1;
+        out+='<div class="mission-cell '+(m.active?"":"inactive")+'" style="grid-column:'+gridColumn+';grid-row:'+gridRow+'"><div class="mission-label" style="background:'+lc+'">'+label+'</div><div class="mission-player '+(doubleAssignment?"double-names":"")+'" style="background:'+bg+';color:'+textColor+'">'+text+'</div></div>';
       });
       out+='</div></div>';
     });
-    return out+'</div>';
+    return out+'</div>'+playersView(w,dayId);
   }
   function playersView(w,dayId) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
-    const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp).map(x=>[x.playerId,x]));
+    const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),colors=colorMap(w,dayId);
     const stack=E.createStackPlan(state.players,w,dayId),vp=E.playerVpTargets(state.players,w,dayId);
-    let out='<div class="section-title">PLAYER ASSIGNMENTS</div><div class="table-wrap"><table class="assignment-table"><thead><tr><th>PLAYER</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th><th>VPS</th></tr></thead><tbody>';
+    let out='<div class="assignments-block"><div class="section-title assignments-title"><span>PLAYER ASSIGNMENTS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table"><thead><tr><th>PLAYER</th><th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
     dp.playerIds.forEach(id=>{
-      const p=players.get(id),l=loads.get(id),stacks=(stack?stack.assignments:[]).filter(x=>x.sparePlayerId===id).map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks).join(" / ")||"—";
-      out+='<tr><td><strong>'+esc(p?p.name:id)+'</strong></td><td class="role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</td><td class="num">'+(l?l.pvpAttacks:0)+'</td><td class="num">'+(l?l.pvzAttacks:0)+'</td><td>'+esc(stacks)+'</td><td><strong>'+(vp.get(id)||0)+'</strong></td></tr>';
+      const p=players.get(id),l=loads.get(id),stacks=(stack?stack.assignments:[])
+        .filter(x=>x.sparePlayerId===id||(x.partnerPlayerId===id&&(l?.spareAttacks||0)>0))
+        .map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks)
+        .join(" / ")||"—";
+      const color=colors.get(id)||"#373e42",code=p?playerCode(p):id.slice(0,3).toUpperCase();
+      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
     });
-    return out+'</tbody></table></div>';
+    return out+'</tbody></table></div></div>';
   }
   function phaseLabel(p) { return p==="OPENING"?"OPEN A/B":p==="PVP_SUPPORT"?"PVP SUPPORT":p==="PVP_CORE"?"PVP CORE / C":"FLEX"; }
   function timelineView(w,dayId) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
-    const players=new Map(state.players.map(p=>[p.id,p])),timeline=E.createTimeline(state.players,w,dayId),stack=E.createStackPlan(state.players,w,dayId);
+    const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),timeline=E.createTimeline(state.players,w,dayId),stack=E.createStackPlan(state.players,w,dayId);
     let out='<div class="section-title">TIMELINE</div><div class="timeline-list">';
     timeline.forEach(x=>{out+='<div class="timeline-row"><div class="time">'+esc(x.localTimeLabel)+' · '+esc(x.utcTimeLabel)+'</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';});
     out+='</div>';
     if(stack){
       out+='<div class="section-title">STACKING PLAN</div><div class="stack-list">';
-      stack.assignments.forEach(x=>{out+='<div class="stack-row"><div class="time">'+esc(x.utcTime)+'</div><div><strong>'+esc((players.get(x.sparePlayerId)||{}).name||x.sparePlayerId)+'</strong> · '+esc(x.targetSector)+' '+x.targetMissionLevel+' x'+x.spareAttacks+' · with '+esc((players.get(x.partnerPlayerId)||{}).name||x.partnerPlayerId)+'</div></div>';});
+      stack.assignments.forEach(x=>{
+        const spareName=(players.get(x.sparePlayerId)||{}).name||x.sparePlayerId;
+        const partnerName=(players.get(x.partnerPlayerId)||{}).name||x.partnerPlayerId;
+        const shared=(loads.get(x.sparePlayerId)?.spareAttacks||0)>0&&(loads.get(x.partnerPlayerId)?.spareAttacks||0)>0;
+        const detail=shared
+          ? '<strong>'+esc(spareName)+'</strong> + '+esc(partnerName)+' · '+esc(x.targetSector)+' · '+x.spareAttacks+' attacks'
+          : '<strong>'+esc(spareName)+'</strong> · '+esc(x.targetSector)+' '+x.targetMissionLevel+' x'+x.spareAttacks+' · with '+esc(partnerName);
+        out+='<div class="stack-row"><div class="time">'+esc(x.utcTime)+'</div><div>'+detail+'</div></div>';
+      });
       out+='</div>';
     }
     return out;
   }
   function sheet(w,dayId,view,capture) {
-    const body=view==="MAP"?mapView(w,dayId):view==="PLAYERS"?playersView(w,dayId):timelineView(w,dayId);
+    const body=view==="MAP"?mapView(w,dayId):timelineView(w,dayId);
     return '<div class="plan-sheet '+(capture?"capture":"")+'">'+sheetHeader(w,dayId)+body+'</div>';
   }
 
   function renderPlan() {
-    const w=week(),valid=D.DAYS.some(d=>w.days[d.id].playerIds.length>0)&&E.isPlanValid(state.players,w);
+    const w=week(),hasAssignments=D.DAYS.some(d=>w.days[d.id].playerIds.length>0),valid=hasAssignments&&E.isPlanValid(state.players,w);
+    el.autoPlanBtn.textContent=hasAssignments?"REPLAN WEEK "+w.week:"AUTO PLAN WEEK "+w.week;
     el.planSection.classList.toggle("hidden",!valid); if(!valid)return;
     if(!w.days[selectedDay])selectedDay=D.DAYS[0].id;
     el.planTitle.textContent="Week "+w.week+" preview";
     el.dayTabs.innerHTML="";
     D.DAYS.forEach(d=>{const b=document.createElement("button");b.type="button";b.className="tab"+(d.id===selectedDay?" active":"");b.textContent=d.short;b.onclick=()=>{selectedDay=d.id;renderPlan();};el.dayTabs.appendChild(b);});
     el.viewTabs.innerHTML="";
-    ["MAP","PLAYERS","TIMELINE"].forEach(v=>{const b=document.createElement("button");b.type="button";b.className="tab"+(v===selectedView?" active":"");b.textContent=v;b.onclick=()=>{selectedView=v;renderPlan();};el.viewTabs.appendChild(b);});
+    ["MAP","TIMELINE"].forEach(v=>{const b=document.createElement("button");b.type="button";b.className="tab"+(v===selectedView?" active":"");b.textContent=v;b.onclick=()=>{selectedView=v;renderPlan();};el.viewTabs.appendChild(b);});
     el.planPreview.innerHTML=sheet(w,selectedDay,selectedView,false);
   }
 
@@ -333,6 +548,14 @@
   el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
   document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
   document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
+  el.playerName.oninput=()=>{
+    if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
+  };
+  el.playerShortCode.oninput=()=>{
+    shortCodeTouched=true;
+    const normalized=normalizeShortCode(el.playerShortCode.value);
+    if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
+  };
   el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
   el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
   el.playerTimeZone.onchange=setDefaultWindow;
