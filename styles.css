@@ -660,6 +660,11 @@ select[size] { min-height: 180px; }
 .toggle-btn.on { border-color: #ff5160; background: #b91524; }
 .modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .grow { flex: 1 1 auto; }
+#linkedAccountsList {
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
+}
 .check-list { display: grid; gap: 8px; }
 .check-list label {
   display: flex;
