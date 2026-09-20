@@ -239,6 +239,20 @@ select[size] { min-height: 180px; }
   border-color: #ff5160;
   background: #b91524;
 }
+.section-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.data-actions {
+  display: grid;
+  gap: 9px;
+}
+.data-actions .btn {
+  width: 100%;
+  min-height: 48px;
+}
+
 .action-card {
   display: flex;
   justify-content: space-between;
@@ -715,6 +729,8 @@ select[size] { min-height: 180px; }
   .section-head { align-items: center; }
 }
 @media (max-width: 520px) {
+  .section-actions { width: 100%; }
+  .section-actions .btn { flex: 1 1 auto; }
   .app-shell { padding-left: 10px; padding-right: 10px; }
   .hero { padding-top: 20px; }
   .card { padding: 13px; border-radius: 13px; }
