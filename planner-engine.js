@@ -210,20 +210,42 @@ window.GWPlannerEngine = (() => {
     return best;
   }
 
+  function doublePreference(player) {
+    if(["PREFERRED","ALLOWED","DO_NOT_USE"].includes(player?.doubleAttackPreference)) {
+      return player.doubleAttackPreference;
+    }
+    return player?.preferredSpare ? "PREFERRED" : "ALLOWED";
+  }
+
+  function canDouble(player) {
+    return doublePreference(player) !== "DO_NOT_USE";
+  }
+
+  function prefersDouble(player) {
+    return doublePreference(player) === "PREFERRED";
+  }
+
+  function linkedPair(first, second) {
+    return (first?.linkedAccountIds || []).includes(second?.id) ||
+      (second?.linkedAccountIds || []).includes(first?.id);
+  }
+
   function bestDoubleAttackPair(players, weekPlan, dayId, coreSet=new Set()) {
     const rolePenalty=p=>p.role==="PVZ"?0:p.role==="BOTH"?1:2;
+    const eligible=players.filter(canDouble);
     const candidates=[];
-    for(let i=0;i<players.length;i++) {
-      for(let j=i+1;j<players.length;j++) {
-        const first=players[i],second=players[j];
+    for(let i=0;i<eligible.length;i++) {
+      for(let j=i+1;j<eligible.length;j++) {
+        const first=eligible[i],second=eligible[j];
         const offsets=sharedPreferredOffsets(first,second,weekPlan,dayId);
         if(!offsets.length) continue;
         candidates.push({
           first,second,
+          linked:linkedPair(first,second)?1:0,
           longestOverlap:longestConsecutiveOverlap(offsets),
           totalOverlap:offsets.length,
           firstOffset:offsets[0],
-          preferredCount:(first.preferredSpare?1:0)+(second.preferredSpare?1:0),
+          preferredCount:(prefersDouble(first)?1:0)+(prefersDouble(second)?1:0),
           nonCoreCount:(coreSet.has(first.id)?0:1)+(coreSet.has(second.id)?0:1),
           rolePenalty:rolePenalty(first)+rolePenalty(second),
           starPenalty:(first.pvpStars||0)+(second.pvpStars||0),
@@ -231,6 +253,7 @@ window.GWPlannerEngine = (() => {
       }
     }
     candidates.sort((a,b)=>
+      b.linked-a.linked ||
       b.longestOverlap-a.longestOverlap ||
       b.totalOverlap-a.totalOverlap ||
       b.preferredCount-a.preferredCount ||
@@ -243,8 +266,9 @@ window.GWPlannerEngine = (() => {
     );
     const best=candidates[0];
     if(!best) return null;
+    const prefRank=p=>doublePreference(p)==="PREFERRED"?0:doublePreference(p)==="ALLOWED"?1:2;
     const ordered=[best.first,best.second].sort((a,b)=>
-      (!!a.preferredSpare!==!!b.preferredSpare ? (a.preferredSpare?-1:1) : 0) ||
+      prefRank(a)-prefRank(b) ||
       ((coreSet.has(a.id)?1:0)-(coreSet.has(b.id)?1:0)) ||
       rolePenalty(a)-rolePenalty(b) ||
       (a.pvpStars||0)-(b.pvpStars||0) ||
@@ -310,19 +334,32 @@ window.GWPlannerEngine = (() => {
       return byName(a,b);
     });
 
+    const doubleEligible=selected.filter(canDouble);
+    if(missionLoad.spareAttacks>0 && !doubleEligible.length) return [];
+
+    const linkedEligibleCount=new Map(
+      doubleEligible.map(player=>[
+        player.id,
+        doubleEligible.filter(other=>other.id!==player.id && linkedPair(player,other)).length
+      ])
+    );
+
     const overlapScore = new Map(
-      selected.map(player=>[
+      doubleEligible.map(player=>[
         player.id,
         weekPlan && dayId
-          ? bestPartnerOverlapSlots(player,selected,weekPlan,dayId)
+          ? bestPartnerOverlapSlots(player,doubleEligible,weekPlan,dayId)
           : 0,
       ])
     );
 
-    const spareOrder = [...selected].sort((a,b) => {
+    const prefRank=p=>doublePreference(p)==="PREFERRED"?0:doublePreference(p)==="ALLOWED"?1:2;
+    const spareOrder = [...doubleEligible].sort((a,b) => {
+      const pr=prefRank(a)-prefRank(b); if(pr!==0) return pr;
+      const al=linkedEligibleCount.get(a.id)||0,bl=linkedEligibleCount.get(b.id)||0;
+      if(al!==bl) return bl-al;
       const ao=overlapScore.get(a.id)||0,bo=overlapScore.get(b.id)||0;
       if(ao!==bo) return bo-ao;
-      if (!!a.preferredSpare !== !!b.preferredSpare) return a.preferredSpare ? -1 : 1;
       const ac = coreSet.has(a.id) ? 1 : 0;
       const bc = coreSet.has(b.id) ? 1 : 0;
       if (ac !== bc) return ac - bc;
@@ -339,16 +376,18 @@ window.GWPlannerEngine = (() => {
     // the anchor; the second pair member receives the other two swords.
     if (dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4) {
       const timePair = weekPlan && dayId
-        ? bestDoubleAttackPair(selected,weekPlan,dayId,coreSet)
+        ? bestDoubleAttackPair(doubleEligible,weekPlan,dayId,coreSet)
         : null;
       const anchor = timePair?.[0] || spareOrder[0];
       if (!anchor) return [];
-      const partner = timePair?.[1] || selected
+      const partner = timePair?.[1] || doubleEligible
         .filter(p => p.id !== anchor.id)
         .sort((a,b) => {
+          const al=linkedPair(anchor,a)?1:0,bl=linkedPair(anchor,b)?1:0;
+          if(al!==bl) return bl-al;
+          const ap=prefRank(a),bp=prefRank(b); if(ap!==bp) return ap-bp;
           const ao=overlapScore.get(a.id)||0,bo=overlapScore.get(b.id)||0;
           if(ao!==bo) return bo-ao;
-          if (!!a.preferredSpare !== !!b.preferredSpare) return a.preferredSpare ? 1 : -1;
           const rank = r => r === "PVZ" ? 0 : r === "BOTH" ? 1 : 2;
           if (rank(a.role) !== rank(b.role)) return rank(a.role) - rank(b.role);
           const ac = coreSet.has(a.id) ? 1 : 0;
@@ -479,11 +518,12 @@ window.GWPlannerEngine = (() => {
     for(let offset=start; offset<BATTLE_DURATION_MINUTES; offset+=STEP_MINUTES) {
       if(!isPreferredAtOffset(sparePlayer,weekPlan,dayId,offset)) continue;
       possiblePartners
-        .filter(p=>isPreferredAtOffset(p,weekPlan,dayId,offset))
+        .filter(p=>canDouble(p) && isPreferredAtOffset(p,weekPlan,dayId,offset))
         .forEach(partner=>{
           candidates.push({
             partner,
             offset,
+            linked:linkedPair(sparePlayer,partner)?1:0,
             distance:Math.abs(offset-preferred),
             overlapStrength:bestPartnerOverlapSlots(
               sparePlayer,[partner],weekPlan,dayId
@@ -493,9 +533,13 @@ window.GWPlannerEngine = (() => {
     }
 
     candidates.sort((a,b)=>{
+      if(a.linked!==b.linked) return b.linked-a.linked;
       if(a.distance!==b.distance) return a.distance-b.distance;
       if(a.overlapStrength!==b.overlapStrength) return b.overlapStrength-a.overlapStrength;
-      if(!!a.partner.preferredSpare!==!!b.partner.preferredSpare) return a.partner.preferredSpare?-1:1;
+      const ap=doublePreference(a.partner),bp=doublePreference(b.partner);
+      const ar=ap==="PREFERRED"?0:ap==="ALLOWED"?1:2;
+      const br=bp==="PREFERRED"?0:bp==="ALLOWED"?1:2;
+      if(ar!==br) return ar-br;
       const rank=r=>r==="PVZ"?0:r==="BOTH"?1:2;
       if(rank(a.partner.role)!==rank(b.partner.role)) return rank(a.partner.role)-rank(b.partner.role);
       if((a.partner.pvpStars||0)!==(b.partner.pvpStars||0)) return (a.partner.pvpStars||0)-(b.partner.pvpStars||0);
@@ -648,7 +692,7 @@ window.GWPlannerEngine = (() => {
         const target = STACK_TARGETS[targetIndex % STACK_TARGETS.length];
         const found = findStackOverlap(
           sparePlayer,
-          selected.filter(p => p.id !== sparePlayer.id),
+          selected.filter(p => p.id !== sparePlayer.id && canDouble(p)),
           weekPlan,
           dayId,
           chunk,
