@@ -32,7 +32,7 @@ window.GWPlannerEngine = (() => {
     },
   ];
 
-  const PHASE_ORDER = { OPENING:0, FLEX:1, PVP_SUPPORT:2, PVP_CORE:3 };
+  const PHASE_ORDER = { OPENING:0, FLEX:1, PVP_SUPPORT:2, PVP_CORE_AB:3, PVP_CORE_C:4 };
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -504,59 +504,118 @@ window.GWPlannerEngine = (() => {
   function createTimeline(players, weekPlan, dayId) {
     const dayPlan = weekPlan.days[dayId];
     if (!dayPlan || dayPlan.teamSize === 0) return [];
+
     const byId = new Map(players.map(p => [p.id,p]));
     const loads = new Map(createAttackLoads(players,dayPlan,weekPlan,dayId).map(x => [x.playerId,x]));
+    const islands = createIslandAssignments(players,weekPlan,dayId);
+    if (!islands.length) return [];
 
-    const drafts = dayPlan.playerIds.map(playerId => {
-      const player = byId.get(playerId);
-      if (!player) return null;
-      const load = loads.get(playerId);
-      let phase = "FLEX";
-      if ((dayPlan.pvpCorePlayerIds || []).includes(playerId)) phase = "PVP_CORE";
-      else if ((load?.pvpAttacks || 0) > 0) phase = "PVP_SUPPORT";
-      else if ((load?.pvzAttacks || 0) > 0) phase = "OPENING";
-      return {
-        playerId,
-        player,
-        phase,
-        needsStacking:(load?.spareAttacks || 0) > 0,
-      };
-    }).filter(Boolean);
+    const missionsByPlayer = new Map();
+    islands.flatMap(x => x.missions)
+      .filter(m => m.active && m.playerId)
+      .forEach(m => {
+        if (!missionsByPlayer.has(m.playerId)) missionsByPlayer.set(m.playerId,[]);
+        missionsByPlayer.get(m.playerId).push(m);
+      });
 
-    const openingOffsets = drafts
-      .filter(x => x.phase === "OPENING")
-      .map(x => earliestPreferredOffset(x.player,weekPlan,dayId,0))
-      .filter(x => x !== null);
+    const countMissions = (playerId,sectors,kind=null) =>
+      (missionsByPlayer.get(playerId)||[]).filter(m =>
+        sectors.has(m.island.slice(-1)) && (!kind || m.kind===kind)
+      ).length;
 
-    const lastOpening = openingOffsets.length ? Math.max(...openingOffsets) : null;
-    const cUnlockTarget = Math.max(
-      PVP_HANDOFF_TARGET_MINUTES,
-      (lastOpening ?? PVP_HANDOFF_TARGET_MINUTES) + (lastOpening === null ? 0 : C_UNLOCK_BUFFER_MINUTES)
+    const abSectors = new Set(["A","B"]);
+    const abPvzStarts = new Map();
+    const abPvzCompletions = new Map();
+
+    dayPlan.playerIds.forEach(playerId => {
+      const count=countMissions(playerId,abSectors,"PVZ");
+      if(!count) return;
+      const player=byId.get(playerId);
+      if(!player) return;
+      const startOffset=earliestPreferredOffset(player,weekPlan,dayId,0);
+      if(startOffset===null) return;
+      abPvzStarts.set(playerId,startOffset);
+      abPvzCompletions.set(playerId,startOffset+count*ATTACK_DURATION_MINUTES);
+    });
+
+    const abPvzComplete=abPvzCompletions.size
+      ? Math.max(...abPvzCompletions.values())
+      : 0;
+
+    const abPvpStarts = new Map();
+    const abPvpCompletions = new Map();
+
+    dayPlan.playerIds.forEach(playerId => {
+      const count=countMissions(playerId,abSectors,"PVP");
+      if(!count) return;
+      const player=byId.get(playerId);
+      if(!player) return;
+      const startOffset=earliestPreferredOffset(player,weekPlan,dayId,abPvzComplete);
+      if(startOffset===null) return;
+      abPvpStarts.set(playerId,startOffset);
+      abPvpCompletions.set(playerId,startOffset+count*ATTACK_DURATION_MINUTES);
+    });
+
+    // C is locked until every active A/B mission has been completed.
+    const abComplete=Math.max(
+      abPvzComplete,
+      abPvpCompletions.size ? Math.max(...abPvpCompletions.values()) : 0
     );
 
-    const entries = drafts.map(draft => {
-      const target = draft.phase === "PVP_CORE" ? cUnlockTarget :
-        draft.phase === "PVP_SUPPORT" ? PVP_SUPPORT_TARGET_MINUTES : 0;
+    const cStarts = new Map();
+    dayPlan.playerIds.forEach(playerId => {
+      const count=countMissions(playerId,new Set(["C"]));
+      if(!count) return;
+      const player=byId.get(playerId);
+      if(!player) return;
+      const startOffset=earliestPreferredOffset(player,weekPlan,dayId,abComplete);
+      if(startOffset===null) return;
+      cStarts.set(playerId,startOffset);
+    });
 
-      const offset = draft.phase === "PVP_CORE"
-        ? earliestPreferredOffset(draft.player,weekPlan,dayId,target)
-        : (earliestPreferredOffset(draft.player,weekPlan,dayId,target)
-          ?? earliestPreferredOffset(draft.player,weekPlan,dayId,0));
+    const entries=dayPlan.playerIds.map(playerId => {
+      const player=byId.get(playerId);
+      if(!player) return null;
+      const load=loads.get(playerId);
+      const abPvzCount=countMissions(playerId,abSectors,"PVZ");
+      const abPvpCount=countMissions(playerId,abSectors,"PVP");
+      const cCount=countMissions(playerId,new Set(["C"]));
+      const dCount=countMissions(playerId,new Set(["D"]));
+      const coreIndex=(dayPlan.pvpCorePlayerIds||[]).indexOf(playerId);
 
-      if (offset === null) return null;
+      let phase="FLEX";
+      let offset=null;
+
+      if(cCount>0 && abPvzCount===0 && abPvpCount===0){
+        phase="PVP_CORE_C";
+        offset=cStarts.get(playerId) ?? null;
+      } else if(abPvzCount>0){
+        phase="OPENING";
+        offset=abPvzStarts.get(playerId) ?? null;
+      } else if(abPvpCount>0){
+        phase=coreIndex>=0 ? "PVP_CORE_AB" : "PVP_SUPPORT";
+        offset=abPvpStarts.get(playerId) ?? null;
+      } else if(dCount>0){
+        phase="FLEX";
+        offset=earliestPreferredOffset(player,weekPlan,dayId,0);
+      } else {
+        offset=earliestPreferredOffset(player,weekPlan,dayId,0);
+      }
+
+      if(offset===null) return null;
       return {
-        playerId:draft.playerId,
-        phase:draft.phase,
+        playerId,
+        phase,
         suggestedOffsetMinutes:offset,
-        localTimeLabel:localTimeLabel(draft.player,weekPlan,dayId,offset),
+        localTimeLabel:localTimeLabel(player,weekPlan,dayId,offset),
         utcTimeLabel:utcTimeLabel(weekPlan,dayId,offset),
-        needsStacking:draft.needsStacking,
+        needsStacking:(load?.spareAttacks||0)>0,
       };
     }).filter(Boolean);
 
     return entries.sort((a,b) =>
-      a.suggestedOffsetMinutes - b.suggestedOffsetMinutes ||
-      PHASE_ORDER[a.phase] - PHASE_ORDER[b.phase]
+      a.suggestedOffsetMinutes-b.suggestedOffsetMinutes ||
+      PHASE_ORDER[a.phase]-PHASE_ORDER[b.phase]
     );
   }
 
@@ -824,7 +883,10 @@ window.GWPlannerEngine = (() => {
       islands.push(fullTemplate("20D",positions));
     }
 
-    const timelineOffsets = new Map(createTimeline(players,weekPlan,dayId).map(x => [x.playerId,x.suggestedOffsetMinutes]));
+    const preferredOffsets = new Map(selected.map(player => [
+      player.id,
+      earliestPreferredOffset(player,weekPlan,dayId,0) ?? 999999
+    ]));
     const coreSet = new Set(dayPlan.pvpCorePlayerIds || []);
     const assignments = new Map();
 
@@ -835,8 +897,8 @@ window.GWPlannerEngine = (() => {
           return kind === "PVP" ? l?.pvpAttacks > 0 : l?.pvzAttacks > 0;
         })
         .sort((a,b) => {
-          const at = timelineOffsets.get(a.id) ?? 999999;
-          const bt = timelineOffsets.get(b.id) ?? 999999;
+          const at = preferredOffsets.get(a.id) ?? 999999;
+          const bt = preferredOffsets.get(b.id) ?? 999999;
           if (at !== bt) return at-bt;
           if (kind === "PVP") {
             const ac = coreSet.has(a.id) ? 1 : 0;
