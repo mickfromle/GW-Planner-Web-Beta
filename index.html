@@ -161,7 +161,20 @@
         </label>
       </div>
 
-      <button id="spareToggle" type="button" class="toggle-btn">NOT PREFERRED FOR DOUBLE ATTACKS</button>
+      <div class="field">
+        <span>LINKED ACCOUNTS</span>
+        <small class="muted compact">Accounts controlled by the same player. Linked accounts are preferred together for double / stack attacks.</small>
+        <div id="linkedAccountsList" class="check-list"></div>
+      </div>
+
+      <label class="field">
+        <span>DOUBLE ATTACKS</span>
+        <select id="doublePreference">
+          <option value="PREFERRED">Preferred for double attacks</option>
+          <option value="ALLOWED">Allowed for double attacks</option>
+          <option value="DO_NOT_USE">Do not use for double attacks</option>
+        </select>
+      </label>
 
       <div class="modal-actions">
         <button id="deletePlayerBtn" type="button" class="btn btn-danger hidden">DELETE</button>
