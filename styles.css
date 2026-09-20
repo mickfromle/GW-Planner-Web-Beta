@@ -218,6 +218,14 @@ select[size] { min-height: 180px; }
   white-space: nowrap;
 }
 .player-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.player-linked {
+  color: #718b97;
+  font-size: 11px;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .availability {
   grid-column: 1 / -1;
   display: flex;
