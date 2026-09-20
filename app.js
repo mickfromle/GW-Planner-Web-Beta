@@ -781,7 +781,7 @@
     });
     return out+'</tbody></table></div></div>';
   }
-  function phaseLabel(p) { return p==="OPENING"?"OPEN A/B":p==="PVP_SUPPORT"?"PVP SUPPORT":p==="PVP_CORE"?"PVP CORE / C":"FLEX"; }
+  function phaseLabel(p) { return p==="OPENING"?"OPEN A/B":p==="PVP_SUPPORT"?"PVP SUPPORT":p==="PVP_CORE_AB"?"PVP CORE / A/B":p==="PVP_CORE_C"?"PVP CORE / C":"FLEX / D"; }
   function timelineView(w,dayId) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),timeline=E.createTimeline(state.players,w,dayId),stack=E.createStackPlan(state.players,w,dayId);
