@@ -911,3 +911,75 @@ select[size] { min-height: 180px; }
   margin-top: 2px;
   white-space: nowrap;
 }
+
+
+.plan-preview-dialog {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: #080a0c;
+  color: var(--text);
+}
+
+.plan-preview-dialog::backdrop {
+  background: #080a0c;
+}
+
+.plan-preview-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 0 0, rgba(112,15,27,.34), transparent 34%),
+    #080a0c;
+}
+
+.plan-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.plan-preview-head h2 {
+  margin: 2px 0 0;
+}
+
+.preview-day-tabs {
+  margin-top: 2px;
+}
+
+.preview-screen-wrap {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+  border-color: #4b2027;
+  background: #080a0c;
+}
+
+.combined-table th {
+  text-align: left;
+}
+
+.combined-table th:nth-child(1) {
+  padding-left: 9px;
+}
+
+.combined-table th:nth-child(2) {
+  padding-left: 7px;
+}
+
+.break-preview {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-weight: 900;
+  letter-spacing: .06em;
+}
