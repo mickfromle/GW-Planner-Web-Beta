@@ -725,7 +725,7 @@
 
     const headers=[
       "Account Name","Country","Region / Time Zone","Role","PvP Strength",
-      "Local Play From","Local Play Until","Double Attacks",
+      "Available From (Local Time)","Available Until (Local Time)","Double Attacks",
       "Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"
     ];
     const countries=[...D.COUNTRIES]
@@ -763,8 +763,8 @@
       ["GW Tactics · Player Data Template"],
       ["How to fill it"],
       ["1. Account Name is the only free-text field."],
-      ["2. Use the dropdowns for Country, Time Zone, Role, PvP Strength, Play Time and Double Attacks."],
-      ["3. Linked Account dropdowns automatically use the Account Names entered in the Players sheet."],
+      ["2. Use the dropdowns for Country, Time Zone, Role, PvP Strength, availability and Double Attacks."],
+      ["3. Enter availability in the player\'s own local time. Do not convert it to German time."],
       ["4. If one real person controls several accounts, select the other account names in Linked Account 1–4."],
       ["5. You do not need to enter the reverse link twice; GW Tactics builds the complete linked-account group during import."],
       ["6. PvP Strength is ignored for PvZ-only accounts."],
@@ -891,8 +891,8 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
@@ -900,8 +900,8 @@
       if(!timeZoneId||!zoneIsValid(timeZoneId)||!allowedZones.includes(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -1247,16 +1247,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -1602,16 +1602,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -1990,16 +1990,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -2324,16 +2324,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -2679,16 +2679,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -3034,16 +3034,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -3422,16 +3422,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -3764,16 +3764,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -4119,16 +4119,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -4474,16 +4474,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
@@ -4862,16 +4862,16 @@
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number.parseInt(String(row["PvP Strength"]||"").trim(),10);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
+      const from=minutesFromTemplate(row["Available From (Local Time)"]);
+      const until=minutesFromTemplate(row["Available Until (Local Time)"]);
       const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
       if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
       if(!doubleAttackPreference)bad.push("Double Attacks");
       if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
 
