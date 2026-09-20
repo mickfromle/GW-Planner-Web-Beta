@@ -672,6 +672,22 @@ select[size] { min-height: 180px; }
   font-weight: 900;
 }
 .toggle-btn.on { border-color: #ff5160; background: #b91524; }
+.review-card { width: min(620px, 100%); }
+.review-message {
+  white-space: pre-wrap;
+  color: #c4d2d9;
+  background: #0c1114;
+  border: 1px solid #344149;
+  border-radius: 11px;
+  padding: 13px 14px;
+  line-height: 1.45;
+  max-height: 52vh;
+  overflow: auto;
+  font-size: 13px;
+}
+.review-message strong {
+  color: #fff;
+}
 .modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .grow { flex: 1 1 auto; }
 #linkedAccountsList {
