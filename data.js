@@ -39,6 +39,11 @@ window.GWPlannerData = (() => {
     { code:"GB-SCT", name:"Scotland", zoneCountry:"GB", flagCode:"gb-sct" },
     { code:"GB-WLS", name:"Wales", zoneCountry:"GB", flagCode:"gb-wls" },
     { code:"GB-NIR", name:"Northern Ireland", zoneCountry:"GB", flagCode:"gb-nir" },
+    { code:"TW-TH", name:"Taiwan (Thailand time)", zoneCountry:"TH", flagCode:"tw" },
+    { code:"IC", name:"Canary Islands", zoneCountry:"ES", flagCode:"ic" },
+    { code:"CQ", name:"Sark", zoneCountry:"GG", flagCode:"cq" },
+    { code:"XK", name:"Kosovo", zoneCountry:"RS", flagCode:"xk" },
+    { code:"DG", name:"Diego Garcia", zoneCountry:"IO", flagCode:"dg" },
   ];
 
   const displayNames = (() => {
@@ -63,6 +68,11 @@ window.GWPlannerData = (() => {
     "GB-SCT": [["Europe/London","London"]],
     "GB-WLS": [["Europe/London","London"]],
     "GB-NIR": [["Europe/London","London"]],
+    "TW-TH": [["Asia/Bangkok","Thailand · UTC+7"]],
+    IC: [["Atlantic/Canary","Canary Islands"]],
+    CQ: [["Europe/Guernsey","Sark"]],
+    XK: [["Europe/Belgrade","Kosovo"]],
+    DG: [["Indian/Chagos","Diego Garcia"]],
     US: [
       ["America/New_York","Eastern"],
       ["America/Chicago","Central"],
@@ -132,8 +142,8 @@ window.GWPlannerData = (() => {
   };
 
   const PLAYER_COLORS = [
-    "#1694ff","#ed4fb2","#20c55c","#ffa436","#f54437","#9d53eb","#24cdcd","#f4e33e",
-    "#4fb1a3","#ff6c92","#597dff","#75cb34","#ff8534","#b15dd0","#3cbeee","#eabb2e",
+    "#e53935","#f4d03f","#20c55c","#1694ff","#ff8c32","#8d5a3b","#9d53eb","#24cdcd",
+    "#ed4fb2","#75cb34","#597dff","#ff6c92","#4fb1a3","#eabb2e","#3cbeee","#b15dd0",
     "#d35353","#5dcb93","#828ced","#e671c9"
   ];
 
@@ -170,6 +180,36 @@ window.GWPlannerData = (() => {
   }
 
   function flagUrl(countryCode) {
+    const customFlags = {
+      IC:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40">' +
+        '<path fill="#fff" d="M0 0h20v40H0z"/><path fill="#0667a6" d="M20 0h20v40H20z"/>' +
+        '<path fill="#fc0" d="M40 0h20v40H40z"/></svg>',
+      EH:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40">' +
+        '<path d="M0 0h60v13.34H0z"/><path fill="#fff" d="M0 13.33h60v13.34H0z"/>' +
+        '<path fill="#007a3d" d="M0 26.66h60V40H0z"/><path fill="#ce1126" d="M0 0l24 20L0 40z"/></svg>',
+      SO:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40">' +
+        '<path fill="#4189dd" d="M0 0h60v40H0z"/><path fill="#fff" d="M30 8l2.8 8.5h9l-7.3 5.3 2.8 8.4-7.3-5.2-7.3 5.2 2.8-8.4-7.3-5.3h9z"/></svg>',
+      CQ:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40">' +
+        '<path fill="#fff" d="M0 0h60v40H0z"/><path fill="#d71920" d="M25 0h10v40H25zM0 15h60v10H0z"/>' +
+        '<path fill="#f2c500" d="M8 5h5v4H8zM15 9h5v4h-5z"/></svg>',
+      XK:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40">' +
+        '<path fill="#244aa5" d="M0 0h60v40H0z"/><path fill="#d4af37" d="M25 17l8-2 5 5-3 7-7 2-5-5z"/>' +
+        '<g fill="#fff"><circle cx="15" cy="11" r="1.4"/><circle cx="21" cy="8" r="1.4"/><circle cx="27" cy="6" r="1.4"/><circle cx="33" cy="6" r="1.4"/><circle cx="39" cy="8" r="1.4"/><circle cx="45" cy="11" r="1.4"/></g></svg>',
+      DG:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40">' +
+        '<path fill="#fff" d="M0 0h60v40H0z"/><path fill="#1e5aa8" d="M0 5h60v4H0zM0 13h60v4H0zM0 21h60v4H0zM0 29h60v4H0zM0 37h60v3H0z"/>' +
+        '<path fill="#0a3b78" d="M0 0h24v16H0z"/><path fill="#d71920" d="M10 0h4v16h-4zM0 6h24v4H0z"/>' +
+        '<path fill="#138a36" d="M41 18l4-8 2 8 7-2-5 6 6 3h-8l-2 9-2-9h-8l6-3-6-6z"/></svg>'
+    };
+    if (customFlags[countryCode]) {
+      return "data:image/svg+xml;charset=UTF-8," +
+        encodeURIComponent(customFlags[countryCode]);
+    }
     const country = COUNTRIES.find(x => x.code === countryCode);
     const code = country?.flagCode || countryCode.toLowerCase();
     return `https://cdn.jsdelivr.net/gh/lipis/flag-icons@7.3.2/flags/4x3/${code}.svg`;
