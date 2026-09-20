@@ -716,7 +716,10 @@
     const countries=[...D.COUNTRIES]
       .map(c=>c.name+" ["+c.code+"]")
       .sort((a,b)=>a.localeCompare(b));
-    const zones=(window.moment?.tz?.names?.() || ["UTC"]).slice().sort();
+    const zones=(window.moment?.tz?.names?.() || ["UTC"])
+      .slice()
+      .sort()
+      .map(id=>id.split("/").map(x=>x.replaceAll("_"," ")).join(" · ")+" ["+id+"]");
     const roles=["PvP","PvZ","Both"];
     const strengths=["1","2","3","4","5"];
     const doubleOptions=[
@@ -811,6 +814,12 @@
     return (match?match[1]:text).trim().toUpperCase();
   }
 
+  function timeZoneFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim();
+  }
+
   function minutesFromTemplate(value) {
     const text=String(value||"").trim();
     const match=text.match(/^(\d{1,2}):(\d{2})$/);
@@ -860,7 +869,7 @@
       seen.add(key);
 
       const countryCode=countryCodeFromTemplate(row["Country"]);
-      const timeZoneId=String(row["Region / Time Zone"]||"").trim();
+      const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
       const stars=Number(row["PvP Strength"]);
       const from=minutesFromTemplate(row["Local Play From"]);
