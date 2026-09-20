@@ -621,7 +621,7 @@
       '</div>';
   }
   function mapView(w,dayId) {
-    const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
+    const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="break-preview">BREAK</div>';
     const load=D.MISSION_LOADS[dp.teamSize],islands=E.createIslandAssignments(state.players,w,dayId),colors=colorMap(w,dayId),players=new Map(state.players.map(p=>[p.id,p])),stack=E.createStackPlan(state.players,w,dayId);
     let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+load.pvpAttacks+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+load.pvzAttacks+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+load.spareAttacks+'</strong><span>STACK ATTACKS</span></div></div>';
     out+='<div class="sector-plan"><div><span>SECTOR PLAN</span><strong>'+esc(load.maxSectorPlan)+'</strong></div><div class="sector-score">MAX VP '+load.maxVp+' <b>·</b> SECTOR SCORE '+load.maxSectorScore+'</div></div><div class="section-title section-title-line"><span>ISLAND ASSIGNMENTS</span></div>';
