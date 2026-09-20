@@ -277,10 +277,36 @@ window.GWPlannerEngine = (() => {
     return ordered;
   }
 
+  function zoneAbbreviation(timeZone, instant) {
+    const offsetMinutes = (() => {
+      const local = localParts(instant,timeZone);
+      const utcWeekday = instant.getUTCDay();
+      const weekdayMap = {Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+      let dayDelta = (weekdayMap[local.weekday] ?? utcWeekday) - utcWeekday;
+      if(dayDelta > 3) dayDelta -= 7;
+      if(dayDelta < -3) dayDelta += 7;
+      return dayDelta*1440 + (local.hour*60+local.minute) -
+        (instant.getUTCHours()*60+instant.getUTCMinutes());
+    })();
+
+    const daylight = {
+      "Europe/Berlin": offsetMinutes===120 ? "CEST" : "CET",
+      "Europe/London": offsetMinutes===60 ? "BST" : "GMT",
+      "America/New_York": offsetMinutes===-240 ? "EDT" : "EST",
+      "America/Chicago": offsetMinutes===-300 ? "CDT" : "CST",
+      "America/Denver": offsetMinutes===-360 ? "MDT" : "MST",
+      "America/Phoenix": "MST",
+      "America/Los_Angeles": offsetMinutes===-420 ? "PDT" : "PST",
+      "America/Anchorage": offsetMinutes===-480 ? "AKDT" : "AKST",
+      "Pacific/Honolulu": "HST",
+    };
+    return daylight[timeZone] || localParts(instant,timeZone).zone;
+  }
+
   function localTimeLabel(player, weekPlan, dayId, offsetMinutes) {
     const instant = new Date(battleStartDate(weekPlan,dayId).getTime() + offsetMinutes * 60000);
     const p = localParts(instant,player.timeZoneId);
-    return `${p.weekday} ${String(p.hour).padStart(2,"0")}:${String(p.minute).padStart(2,"0")} ${p.zone}`;
+    return `${p.weekday} ${String(p.hour).padStart(2,"0")}:${String(p.minute).padStart(2,"0")} ${zoneAbbreviation(player.timeZoneId,instant)}`;
   }
 
   function utcTimeLabel(weekPlan, dayId, offsetMinutes) {
