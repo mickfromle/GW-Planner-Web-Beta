@@ -6,7 +6,7 @@
   const el = {
     weekTabs:byId("weekTabs"), weekStart:byId("weekStart"), teamSizeGrid:byId("teamSizeGrid"),
     saveSetupBtn:byId("saveSetupBtn"), playerCount:byId("playerCount"), playerList:byId("playerList"),
-    addPlayerBtn:byId("addPlayerBtn"), autoPlanBtn:byId("autoPlanBtn"), planSection:byId("planSection"),
+    addPlayerBtn:byId("addPlayerBtn"), playerDataBtn:byId("playerDataBtn"), autoPlanBtn:byId("autoPlanBtn"), planSection:byId("planSection"),
     planTitle:byId("planTitle"), dayTabs:byId("dayTabs"), viewTabs:byId("viewTabs"),
     planPreview:byId("planPreview"), exportBtn:byId("exportBtn"), playerDialog:byId("playerDialog"),
     playerForm:byId("playerForm"), playerDialogTitle:byId("playerDialogTitle"), playerId:byId("playerId"),
@@ -15,7 +15,11 @@
     playerStars:byId("playerStars"), starsField:byId("starsField"), playStart:byId("playStart"),
     playEnd:byId("playEnd"), linkedAccountsList:byId("linkedAccountsList"), doublePreference:byId("doublePreference"), deletePlayerBtn:byId("deletePlayerBtn"),
     exportDialog:byId("exportDialog"), exportForm:byId("exportForm"), exportRange:byId("exportRange"),
-    exportStatus:byId("exportStatus"), toast:byId("toast"), captureRoot:byId("captureRoot")
+    exportStatus:byId("exportStatus"), toast:byId("toast"), captureRoot:byId("captureRoot"),
+    playerDataDialog:byId("playerDataDialog"), downloadPlayerTemplateBtn:byId("downloadPlayerTemplateBtn"),
+    importPlayersBtn:byId("importPlayersBtn"), createBackupBtn:byId("createBackupBtn"),
+    restoreBackupBtn:byId("restoreBackupBtn"), playerWorkbookInput:byId("playerWorkbookInput"),
+    backupInput:byId("backupInput")
   };
 
   function normalizeShortCode(value) {
@@ -645,10 +649,335 @@
     }catch(err){if(err&&err.name!=="AbortError"){console.error(err);el.exportStatus.textContent="Export failed. Please try again.";}}
   }
 
+  function downloadBlob(blob,name) {
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+  }
+
+  function xmlEscape(value) {
+    return String(value)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&apos;");
+  }
+
+  async function downloadPlayerTemplate() {
+    if(!window.XLSX || !window.JSZip) {
+      toast("Template tools are not available.");
+      return;
+    }
+
+    const headers=[
+      "Account Name","Country","Region / Time Zone","Role","PvP Strength",
+      "Local Play From","Local Play Until","Double Attacks",
+      "Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"
+    ];
+    const countries=[...D.COUNTRIES]
+      .map(c=>c.name+" ["+c.code+"]")
+      .sort((a,b)=>a.localeCompare(b));
+    const zones=(window.moment?.tz?.names?.() || ["UTC"]).slice().sort();
+    const roles=["PvP","PvZ","Both"];
+    const strengths=["1","2","3","4","5"];
+    const doubleOptions=[
+      "Preferred for double attacks",
+      "Allowed for double attacks",
+      "Do not use for double attacks"
+    ];
+    const times=[];
+    for(let h=0;h<24;h++){
+      times.push(String(h).padStart(2,"0")+":00");
+      times.push(String(h).padStart(2,"0")+":30");
+    }
+    times.push("24:00");
+
+    const rows=[headers];
+    for(let i=0;i<100;i++) rows.push(Array(headers.length).fill(""));
+    const playerSheet=XLSX.utils.aoa_to_sheet(rows);
+    playerSheet["!cols"]=[
+      {wch:24},{wch:28},{wch:30},{wch:14},{wch:14},{wch:18},{wch:18},{wch:29},
+      {wch:24},{wch:24},{wch:24},{wch:24}
+    ];
+
+    const instructionRows=[
+      ["GW Tactics · Player Data Template"],
+      ["How to fill it"],
+      ["1. Account Name is the only free-text field."],
+      ["2. Use the dropdowns for Country, Time Zone, Role, PvP Strength, Play Time and Double Attacks."],
+      ["3. Linked Account dropdowns automatically use the Account Names entered in the Players sheet."],
+      ["4. If one real person controls several accounts, select the other account names in Linked Account 1–4."],
+      ["5. You do not need to enter the reverse link twice; GW Tactics builds the complete linked-account group during import."],
+      ["6. PvP Strength is ignored for PvZ-only accounts."],
+      ["7. Do not rename the Players sheet or its column headers."],
+      ["8. Save the workbook as .xlsx and import it into GW Tactics."]
+    ];
+    const instructionSheet=XLSX.utils.aoa_to_sheet(instructionRows);
+    instructionSheet["!cols"]=[{wch:100}];
+
+    const max=Math.max(countries.length,zones.length,roles.length,strengths.length,doubleOptions.length,times.length);
+    const listRows=[["Countries","Time Zones","Roles","PvP Strength","Double Attacks","Times"]];
+    for(let i=0;i<max;i++){
+      listRows.push([
+        countries[i]||"",zones[i]||"",roles[i]||"",strengths[i]||"",
+        doubleOptions[i]||"",times[i]||""
+      ]);
+    }
+    const listSheet=XLSX.utils.aoa_to_sheet(listRows);
+    listSheet["!cols"]=[{wch:34},{wch:34},{wch:18},{wch:18},{wch:30},{wch:16}];
+
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,playerSheet,"Players");
+    XLSX.utils.book_append_sheet(wb,instructionSheet,"Instructions");
+    XLSX.utils.book_append_sheet(wb,listSheet,"Lists");
+
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath="xl/worksheets/sheet1.xml";
+    let xml=await zip.file(sheetPath).async("string");
+
+    const validation=(sqref,formula)=>
+      '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+
+      xmlEscape(formula)+'</formula1></dataValidation>';
+
+    const validations=[
+      validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
+      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
+      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
+      validation("I2:L101","$A$2:$A$101")
+    ].join("");
+
+    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    zip.file(sheetPath,xml);
+    const blob=await zip.generateAsync({
+      type:"blob",
+      mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    downloadBlob(blob,"gw_tactics_player_template.xlsx");
+    toast("Player template created.");
+  }
+
+  function countryCodeFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/\[([^\]]+)]\s*$/);
+    return (match?match[1]:text).trim().toUpperCase();
+  }
+
+  function minutesFromTemplate(value) {
+    const text=String(value||"").trim();
+    const match=text.match(/^(\d{1,2}):(\d{2})$/);
+    if(!match)return null;
+    const h=Number(match[1]),m=Number(match[2]);
+    if(h===24&&m===0)return 1440;
+    if(h<0||h>23||m<0||m>59)return null;
+    return h*60+m;
+  }
+
+  function roleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase().replaceAll(" ","");
+    if(v==="pvp")return "PVP";
+    if(v==="pvz")return "PVZ";
+    if(v==="both"||v==="pvp+pvz"||v==="pvz+pvp")return "BOTH";
+    return null;
+  }
+
+  function doubleFromTemplate(value) {
+    const v=String(value||"").trim().toLowerCase();
+    if(v.startsWith("preferred"))return "PREFERRED";
+    if(v.startsWith("allowed"))return "ALLOWED";
+    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    return null;
+  }
+
+  function zoneIsValid(zone) {
+    try {
+      new Intl.DateTimeFormat("en-US",{timeZone:zone}).format(new Date());
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function importWorkbookRows(rows) {
+    const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const parsed=[];
+    const warnings=[];
+    const seen=new Set();
+
+    rows.forEach((row,index)=>{
+      const rowNo=index+2;
+      const name=String(row["Account Name"]||"").trim();
+      if(!name)return;
+      const key=name.toLowerCase();
+      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+      seen.add(key);
+
+      const countryCode=countryCodeFromTemplate(row["Country"]);
+      const timeZoneId=String(row["Region / Time Zone"]||"").trim();
+      const role=roleFromTemplate(row["Role"]);
+      const stars=Number(row["PvP Strength"]);
+      const from=minutesFromTemplate(row["Local Play From"]);
+      const until=minutesFromTemplate(row["Local Play Until"]);
+      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const bad=[];
+      if(!countryCode)bad.push("Country");
+      if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
+      if(!role)bad.push("Role");
+      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
+      if(from===null)bad.push("Local Play From");
+      if(until===null)bad.push("Local Play Until");
+      if(!doubleAttackPreference)bad.push("Double Attacks");
+      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+
+      const existing=existingByName.get(key)||null;
+      parsed.push({
+        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
+        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
+        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+          .map(h=>String(row[h]||"").trim())
+          .filter(x=>x&&x.toLowerCase()!==key)
+          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
+        existing
+      });
+    });
+
+    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
+    parsed.forEach(p=>p.linkedNames.forEach(name=>{
+      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
+    }));
+
+    return {
+      parsed,warnings,
+      newCount:parsed.filter(p=>!p.existing).length,
+      updateCount:parsed.filter(p=>!!p.existing).length
+    };
+  }
+
+  function applyWorkbookImport(plan) {
+    const importedIds=new Set(plan.parsed.map(p=>p.id));
+
+    plan.parsed.forEach(row=>{
+      const current=row.existing;
+      const player={
+        id:row.id,name:row.name,
+        shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
+        colorHex:current?playerColor(current):suggestPlayerColor(row.id),
+        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        preferredSpare:row.doubleAttackPreference==="PREFERRED",
+        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+      };
+      const i=state.players.findIndex(p=>p.id===row.id);
+      if(i>=0)state.players[i]=player;else state.players.push(player);
+    });
+
+    state.players.forEach(p=>{
+      if(importedIds.has(p.id))p.linkedAccountIds=[];
+      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
+    });
+
+    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
+    const byId=new Map(state.players.map(p=>[p.id,p]));
+    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
+    plan.parsed.forEach(row=>{
+      row.linkedNames.forEach(name=>{
+        const id=byName.get(name.toLowerCase());
+        if(!id||id===row.id)return;
+        adjacency.get(row.id).add(id);
+        adjacency.get(id).add(row.id);
+      });
+    });
+
+    const visited=new Set();
+    importedIds.forEach(root=>{
+      if(visited.has(root))return;
+      const group=new Set([root]),queue=[root];visited.add(root);
+      while(queue.length){
+        const cur=queue.shift();
+        (adjacency.get(cur)||[]).forEach(next=>{
+          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
+        });
+      }
+      group.forEach(id=>{
+        const p=byId.get(id);
+        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
+      });
+    });
+
+    saveState();renderPlayers();renderPlan();
+  }
+
+  async function handlePlayerWorkbook(file) {
+    try {
+      const bytes=await file.arrayBuffer();
+      const wb=XLSX.read(bytes,{type:"array"});
+      const sheet=wb.Sheets["Players"]||wb.Sheets[wb.SheetNames[0]];
+      if(!sheet)throw new Error("Players sheet missing");
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
+      const plan=importWorkbookRows(rows);
+      if(!plan.parsed.length){
+        alert("No valid players were found.\n\n"+plan.warnings.slice(0,8).join("\n"));
+        return;
+      }
+      let message=plan.newCount+" new · "+plan.updateCount+" updates · "+plan.warnings.length+" warnings\n\nImport the valid rows now?";
+      if(plan.warnings.length)message+="\n\n"+plan.warnings.slice(0,6).join("\n");
+      if(confirm(message)){
+        applyWorkbookImport(plan);
+        toast("Player import completed.");
+        if(el.playerDataDialog.open)el.playerDataDialog.close();
+      }
+    } catch(err) {
+      console.error(err);
+      toast("The selected workbook could not be read.");
+    }
+  }
+
+  function createPlannerBackup() {
+    const payload={
+      format:"GW_TACTICS_PLANNER_BACKUP",
+      version:1,
+      createdAt:new Date().toISOString(),
+      state
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
+    toast("Planner backup created.");
+  }
+
+  async function restorePlannerBackup(file) {
+    try {
+      const parsed=JSON.parse(await file.text());
+      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||!parsed?.state?.players||!parsed?.state?.weeks){
+        throw new Error("Invalid backup");
+      }
+      if(!confirm("This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?"))return;
+      state=parsed.state;
+      state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
+      selectedDay=D.DAYS[0].id;selectedView="MAP";
+      saveState();renderAll();
+      toast("Planner backup restored.");
+      if(el.playerDataDialog.open)el.playerDataDialog.close();
+    } catch(err) {
+      console.error(err);
+      toast("The selected backup could not be restored.");
+    }
+  }
+
   function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
-  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
   el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
   document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
+  document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
+  el.downloadPlayerTemplateBtn.onclick=downloadPlayerTemplate;
+  el.importPlayersBtn.onclick=()=>{el.playerWorkbookInput.value="";el.playerWorkbookInput.click();};
+  el.createBackupBtn.onclick=createPlannerBackup;
+  el.restoreBackupBtn.onclick=()=>{el.backupInput.value="";el.backupInput.click();};
+  el.playerWorkbookInput.onchange=()=>{const file=el.playerWorkbookInput.files?.[0];if(file)handlePlayerWorkbook(file);};
+  el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
   document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
   el.playerName.oninput=()=>{
     if(!shortCodeTouched) el.playerShortCode.value=suggestShortCode(el.playerName.value,el.playerId.value || null);
