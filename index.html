@@ -82,15 +82,29 @@
             <div class="section-kicker">PLAN</div>
             <h2 id="planTitle">Week preview</h2>
           </div>
-          <button id="exportBtn" class="btn btn-secondary">EXPORT</button>
+          <div class="section-actions">
+            <button id="openPreviewBtn" class="btn btn-primary">PREVIEW</button>
+            <button id="exportBtn" class="btn btn-secondary">EXPORT</button>
+          </div>
         </div>
-
-        <div id="dayTabs" class="day-tabs"></div>
-        <div id="viewTabs" class="view-tabs"></div>
-        <div id="planPreview" class="preview-wrap"></div>
       </section>
     </main>
   </div>
+
+  <dialog id="planPreviewDialog" class="plan-preview-dialog">
+    <div class="plan-preview-shell">
+      <div class="plan-preview-head">
+        <div>
+          <div class="section-kicker">GW TACTICS</div>
+          <h2>PLAN PREVIEW</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-plan-preview>×</button>
+      </div>
+      <div id="dayTabs" class="day-tabs preview-day-tabs"></div>
+      <div id="viewTabs" class="view-tabs hidden"></div>
+      <div id="planPreview" class="preview-wrap preview-screen-wrap"></div>
+    </div>
+  </dialog>
 
   <dialog id="playerDataDialog" class="modal">
     <div class="modal-card">
