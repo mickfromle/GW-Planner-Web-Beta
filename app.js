@@ -831,6 +831,7 @@
     const parsed=[];
     const warnings=[];
     const seen=new Set();
+    const filledCount=rows.filter(row=>String(row["Account Name"]||"").trim()).length;
 
     rows.forEach((row,index)=>{
       const rowNo=index+2;
@@ -878,7 +879,8 @@
     return {
       parsed,warnings,
       newCount:parsed.filter(p=>!p.existing).length,
-      updateCount:parsed.filter(p=>!!p.existing).length
+      updateCount:parsed.filter(p=>!!p.existing).length,
+      skippedCount:Math.max(0,filledCount-parsed.length)
     };
   }
 
@@ -983,7 +985,7 @@
           let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
           if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
           if(names.length>14)result+="\n… +"+(names.length-14);
-          if(plan.warnings.length)result+="\n\n"+plan.warnings.length+" row(s) were skipped because of warnings.";
+          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
 
           showReview({
             title:"IMPORT COMPLETE",
