@@ -6,14 +6,29 @@ window.GWPlannerEngine = (() => {
   const BATTLE_DURATION_MINUTES = 22 * 60;
   const PVP_HANDOFF_TARGET_MINUTES = 4 * 60;
   const PVP_SUPPORT_TARGET_MINUTES = 3 * 60;
-  const STEP_MINUTES = 30;
+  // General rule for PvP and PvZ: one attack takes at most ~5 minutes.
+  const ATTACK_DURATION_MINUTES = 5;
+  const STEP_MINUTES = ATTACK_DURATION_MINUTES;
+  // A coordinated double action is simultaneous, so it uses one attack slot.
+  const DOUBLE_BLOCK_MINUTES = ATTACK_DURATION_MINUTES;
 
   const STACK_TARGETS = [
-    { sector:"20A", missionLevel:52 },
-    { sector:"20B", missionLevel:52 },
-    { sector:"20A", missionLevel:53 },
-    { sector:"20B", missionLevel:53 },
-    { sector:"20C", missionLevel:52 },
+    { sector:"20A", missionLevel:54, earliestOffsetMinutes:0, preferredOffsetMinutes:0 },
+    { sector:"20B", missionLevel:54, earliestOffsetMinutes:0, preferredOffsetMinutes:60 },
+    { sector:"20A", missionLevel:53, earliestOffsetMinutes:0, preferredOffsetMinutes:90 },
+    { sector:"20B", missionLevel:53, earliestOffsetMinutes:0, preferredOffsetMinutes:120 },
+    { sector:"20C", missionLevel:53, earliestOffsetMinutes:120, preferredOffsetMinutes:180 },
+  ];
+
+  const EIGHT_V_EIGHT_TARGETS = [
+    { sector:"20A", missionLevel:54, earliestOffsetMinutes:0, preferredOffsetMinutes:0 },
+    { sector:"20B", missionLevel:54, earliestOffsetMinutes:0, preferredOffsetMinutes:60 },
+    {
+      sector:"20D",
+      missionLevel:54,
+      earliestOffsetMinutes:PVP_HANDOFF_TARGET_MINUTES,
+      preferredOffsetMinutes:PVP_HANDOFF_TARGET_MINUTES,
+    },
   ];
 
   const PHASE_ORDER = { OPENING:0, FLEX:1, PVP_SUPPORT:2, PVP_CORE:3 };
@@ -156,6 +171,88 @@ window.GWPlannerEngine = (() => {
     return isPreferredLocalTime(player,instant);
   }
 
+  function sharedPreferredOffsets(first, second, weekPlan, dayId) {
+    const offsets=[];
+    for(let offset=0; offset<BATTLE_DURATION_MINUTES; offset+=STEP_MINUTES) {
+      if(
+        isPreferredAtOffset(first,weekPlan,dayId,offset) &&
+        isPreferredAtOffset(second,weekPlan,dayId,offset)
+      ) offsets.push(offset);
+    }
+    return offsets;
+  }
+
+  function longestConsecutiveOverlap(offsets) {
+    if(!offsets.length) return 0;
+    let longest=1,current=1;
+    for(let i=1;i<offsets.length;i++) {
+      if(offsets[i]-offsets[i-1]===STEP_MINUTES) {
+        current++;
+        longest=Math.max(longest,current);
+      } else {
+        current=1;
+      }
+    }
+    return longest;
+  }
+
+  function bestPartnerOverlapSlots(player, possiblePartners, weekPlan, dayId) {
+    let best=0;
+    possiblePartners.forEach(partner=>{
+      if(partner.id===player.id) return;
+      best=Math.max(
+        best,
+        longestConsecutiveOverlap(
+          sharedPreferredOffsets(player,partner,weekPlan,dayId)
+        )
+      );
+    });
+    return best;
+  }
+
+  function bestDoubleAttackPair(players, weekPlan, dayId, coreSet=new Set()) {
+    const rolePenalty=p=>p.role==="PVZ"?0:p.role==="BOTH"?1:2;
+    const candidates=[];
+    for(let i=0;i<players.length;i++) {
+      for(let j=i+1;j<players.length;j++) {
+        const first=players[i],second=players[j];
+        const offsets=sharedPreferredOffsets(first,second,weekPlan,dayId);
+        if(!offsets.length) continue;
+        candidates.push({
+          first,second,
+          longestOverlap:longestConsecutiveOverlap(offsets),
+          totalOverlap:offsets.length,
+          firstOffset:offsets[0],
+          preferredCount:(first.preferredSpare?1:0)+(second.preferredSpare?1:0),
+          nonCoreCount:(coreSet.has(first.id)?0:1)+(coreSet.has(second.id)?0:1),
+          rolePenalty:rolePenalty(first)+rolePenalty(second),
+          starPenalty:(first.pvpStars||0)+(second.pvpStars||0),
+        });
+      }
+    }
+    candidates.sort((a,b)=>
+      b.longestOverlap-a.longestOverlap ||
+      b.totalOverlap-a.totalOverlap ||
+      b.preferredCount-a.preferredCount ||
+      b.nonCoreCount-a.nonCoreCount ||
+      a.rolePenalty-b.rolePenalty ||
+      a.starPenalty-b.starPenalty ||
+      a.firstOffset-b.firstOffset ||
+      byName(a.first,b.first) ||
+      byName(a.second,b.second)
+    );
+    const best=candidates[0];
+    if(!best) return null;
+    const ordered=[best.first,best.second].sort((a,b)=>
+      (!!a.preferredSpare!==!!b.preferredSpare ? (a.preferredSpare?-1:1) : 0) ||
+      ((coreSet.has(a.id)?1:0)-(coreSet.has(b.id)?1:0)) ||
+      rolePenalty(a)-rolePenalty(b) ||
+      (a.pvpStars||0)-(b.pvpStars||0) ||
+      byName(a,b)
+    );
+    return ordered;
+  }
+
   function localTimeLabel(player, weekPlan, dayId, offsetMinutes) {
     const instant = new Date(battleStartDate(weekPlan,dayId).getTime() + offsetMinutes * 60000);
     const p = localParts(instant,player.timeZoneId);
@@ -175,7 +272,7 @@ window.GWPlannerEngine = (() => {
     return (a.name || "").localeCompare(b.name || "",undefined,{sensitivity:"base"});
   }
 
-  function createAttackLoads(players, dayPlan) {
+  function createAttackLoads(players, dayPlan, weekPlan=null, dayId=null) {
     if (!dayPlan || dayPlan.teamSize === 0) return [];
     const missionLoad = MISSION_LOADS[dayPlan.teamSize];
     if (!missionLoad) return [];
@@ -213,7 +310,18 @@ window.GWPlannerEngine = (() => {
       return byName(a,b);
     });
 
+    const overlapScore = new Map(
+      selected.map(player=>[
+        player.id,
+        weekPlan && dayId
+          ? bestPartnerOverlapSlots(player,selected,weekPlan,dayId)
+          : 0,
+      ])
+    );
+
     const spareOrder = [...selected].sort((a,b) => {
+      const ao=overlapScore.get(a.id)||0,bo=overlapScore.get(b.id)||0;
+      if(ao!==bo) return bo-ao;
       if (!!a.preferredSpare !== !!b.preferredSpare) return a.preferredSpare ? -1 : 1;
       const ac = coreSet.has(a.id) ? 1 : 0;
       const bc = coreSet.has(b.id) ? 1 : 0;
@@ -225,16 +333,48 @@ window.GWPlannerEngine = (() => {
     });
 
     const targetMissions = new Map(selected.map(p => [p.id,ATTACKS_PER_PLAYER]));
-    let spareRemaining = missionLoad.spareAttacks;
-    let spareIndex = 0;
-    while (spareRemaining > 0) {
-      const player = spareOrder[spareIndex % spareOrder.length];
-      const chunk = Math.min(2,spareRemaining);
-      const current = targetMissions.get(player.id);
-      if (current < chunk) return [];
-      targetMissions.set(player.id,current - chunk);
-      spareRemaining -= chunk;
-      spareIndex++;
+
+    // 8v8: four spare swords are one two-player stack pair.
+    // Each participant spends two attacks. A marked Spare Maker stays
+    // the anchor; the second pair member receives the other two swords.
+    if (dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4) {
+      const timePair = weekPlan && dayId
+        ? bestDoubleAttackPair(selected,weekPlan,dayId,coreSet)
+        : null;
+      const anchor = timePair?.[0] || spareOrder[0];
+      if (!anchor) return [];
+      const partner = timePair?.[1] || selected
+        .filter(p => p.id !== anchor.id)
+        .sort((a,b) => {
+          const ao=overlapScore.get(a.id)||0,bo=overlapScore.get(b.id)||0;
+          if(ao!==bo) return bo-ao;
+          if (!!a.preferredSpare !== !!b.preferredSpare) return a.preferredSpare ? 1 : -1;
+          const rank = r => r === "PVZ" ? 0 : r === "BOTH" ? 1 : 2;
+          if (rank(a.role) !== rank(b.role)) return rank(a.role) - rank(b.role);
+          const ac = coreSet.has(a.id) ? 1 : 0;
+          const bc = coreSet.has(b.id) ? 1 : 0;
+          if (ac !== bc) return ac - bc;
+          if ((a.pvpStars||0) !== (b.pvpStars||0)) return (a.pvpStars||0) - (b.pvpStars||0);
+          return byName(a,b);
+        })[0];
+      if (!partner) return [];
+      for (const player of [anchor,partner]) {
+        const current = targetMissions.get(player.id);
+        if (current < 2) return [];
+        targetMissions.set(player.id,current - 2);
+      }
+    } else {
+      let spareRemaining = missionLoad.spareAttacks;
+      let spareIndex = 0;
+      while (spareRemaining > 0) {
+        const player = spareOrder[spareIndex % spareOrder.length];
+        const chunk = Math.min(2,spareRemaining);
+        const current = targetMissions.get(player.id);
+        if (current < chunk) return [];
+        targetMissions.set(player.id,current - chunk);
+        spareRemaining -= chunk;
+        spareIndex++;
+      }
     }
 
     const missionCount = missionLoad.pvpAttacks + missionLoad.pvzAttacks;
@@ -299,7 +439,7 @@ window.GWPlannerEngine = (() => {
     const dayPlan = weekPlan.days[dayId];
     if (!dayPlan || dayPlan.teamSize === 0) return [];
     const byId = new Map(players.map(p => [p.id,p]));
-    const loads = new Map(createAttackLoads(players,dayPlan).map(x => [x.playerId,x]));
+    const loads = new Map(createAttackLoads(players,dayPlan,weekPlan,dayId).map(x => [x.playerId,x]));
 
     const entries = dayPlan.playerIds.map(playerId => {
       const player = byId.get(playerId);
@@ -331,32 +471,53 @@ window.GWPlannerEngine = (() => {
   }
 
   function findStackOverlap(sparePlayer, possiblePartners, weekPlan, dayId, spareAttacks, target) {
-    for (let offset=0; offset<=BATTLE_DURATION_MINUTES; offset+=STEP_MINUTES) {
-      if (!isPreferredAtOffset(sparePlayer,weekPlan,dayId,offset)) continue;
-      const candidates = possiblePartners
-        .filter(p => isPreferredAtOffset(p,weekPlan,dayId,offset))
-        .sort((a,b) => {
-          const rank = r => r === "PVZ" ? 0 : r === "BOTH" ? 1 : 2;
-          if (rank(a.role)!==rank(b.role)) return rank(a.role)-rank(b.role);
-          if ((a.pvpStars||0)!==(b.pvpStars||0)) return (a.pvpStars||0)-(b.pvpStars||0);
-          return byName(a,b);
+    const earliest=target.earliestOffsetMinutes||0;
+    const preferred=target.preferredOffsetMinutes||0;
+    const candidates=[];
+    const start=Math.ceil(Math.max(0,earliest)/STEP_MINUTES)*STEP_MINUTES;
+
+    for(let offset=start; offset<BATTLE_DURATION_MINUTES; offset+=STEP_MINUTES) {
+      if(!isPreferredAtOffset(sparePlayer,weekPlan,dayId,offset)) continue;
+      possiblePartners
+        .filter(p=>isPreferredAtOffset(p,weekPlan,dayId,offset))
+        .forEach(partner=>{
+          candidates.push({
+            partner,
+            offset,
+            distance:Math.abs(offset-preferred),
+            overlapStrength:bestPartnerOverlapSlots(
+              sparePlayer,[partner],weekPlan,dayId
+            ),
+          });
         });
-      const partner = candidates[0];
-      if (!partner) continue;
-      return {
-        sparePlayerId:sparePlayer.id,
-        partnerPlayerId:partner.id,
-        targetSector:target.sector,
-        targetMissionLevel:target.missionLevel,
-        spareAttacks,
-        suggestedOffsetMinutes:offset,
-        sparePlayerLocalTime:localTimeLabel(sparePlayer,weekPlan,dayId,offset),
-        partnerLocalTime:localTimeLabel(partner,weekPlan,dayId,offset),
-        utcTime:utcTimeLabel(weekPlan,dayId,offset),
-      };
     }
-    return null;
+
+    candidates.sort((a,b)=>{
+      if(a.distance!==b.distance) return a.distance-b.distance;
+      if(a.overlapStrength!==b.overlapStrength) return b.overlapStrength-a.overlapStrength;
+      if(!!a.partner.preferredSpare!==!!b.partner.preferredSpare) return a.partner.preferredSpare?-1:1;
+      const rank=r=>r==="PVZ"?0:r==="BOTH"?1:2;
+      if(rank(a.partner.role)!==rank(b.partner.role)) return rank(a.partner.role)-rank(b.partner.role);
+      if((a.partner.pvpStars||0)!==(b.partner.pvpStars||0)) return (a.partner.pvpStars||0)-(b.partner.pvpStars||0);
+      if(a.offset!==b.offset) return a.offset-b.offset;
+      return byName(a.partner,b.partner);
+    });
+
+    const best=candidates[0];
+    if(!best) return null;
+    return {
+      sparePlayerId:sparePlayer.id,
+      partnerPlayerId:best.partner.id,
+      targetSector:target.sector,
+      targetMissionLevel:target.missionLevel,
+      spareAttacks,
+      suggestedOffsetMinutes:best.offset,
+      sparePlayerLocalTime:localTimeLabel(sparePlayer,weekPlan,dayId,best.offset),
+      partnerLocalTime:localTimeLabel(best.partner,weekPlan,dayId,best.offset),
+      utcTime:utcTimeLabel(weekPlan,dayId,best.offset),
+    };
   }
+
 
   function createStackPlan(players, weekPlan, dayId) {
     const dayPlan = weekPlan.days[dayId];
@@ -366,8 +527,117 @@ window.GWPlannerEngine = (() => {
 
     const byId = new Map(players.map(p => [p.id,p]));
     const selected = dayPlan.playerIds.map(id => byId.get(id)).filter(Boolean);
-    const loads = new Map(createAttackLoads(players,dayPlan).map(x => [x.playerId,x]));
+    const loads = new Map(createAttackLoads(players,dayPlan,weekPlan,dayId).map(x => [x.playerId,x]));
     const sparePlayers = selected.filter(p => (loads.get(p.id)?.spareAttacks || 0) > 0);
+
+    // 8v8 uses one shared pair with two attacks each. Time-zone overlap
+    // has priority. A/B remain the early default; 20D becomes preferable
+    // when the pair's common play window is later in the battle.
+    if (
+      dayPlan.teamSize === 8 &&
+      missionLoad.spareAttacks === 4 &&
+      sparePlayers.length === 2 &&
+      sparePlayers.every(p => (loads.get(p.id)?.spareAttacks || 0) === 2)
+    ) {
+      const pair=bestDoubleAttackPair(
+        sparePlayers,
+        weekPlan,
+        dayId,
+        new Set(dayPlan.pvpCorePlayerIds||[])
+      ) || sparePlayers;
+      const first=pair[0],second=pair[1];
+
+      const targetPairs=[];
+      for(let i=0;i<EIGHT_V_EIGHT_TARGETS.length-1;i++){
+        for(let j=i+1;j<EIGHT_V_EIGHT_TARGETS.length;j++){
+          targetPairs.push({
+            firstTarget:EIGHT_V_EIGHT_TARGETS[i],
+            secondTarget:EIGHT_V_EIGHT_TARGETS[j],
+            orderIndex:i*10+j,
+          });
+        }
+      }
+
+      const choices=targetPairs.map(pairChoice=>{
+        const firstTarget=pairChoice.firstTarget;
+        const secondTarget=pairChoice.secondTarget;
+        const earliest=Math.max(
+          0,
+          firstTarget.earliestOffsetMinutes||0,
+          (secondTarget.earliestOffsetMinutes||0)-DOUBLE_BLOCK_MINUTES
+        );
+        let start=earliest;
+
+        while(start<BATTLE_DURATION_MINUTES-DOUBLE_BLOCK_MINUTES){
+          const secondStart=start+DOUBLE_BLOCK_MINUTES;
+          const bothAvailable=
+            isPreferredAtOffset(first,weekPlan,dayId,start) &&
+            isPreferredAtOffset(second,weekPlan,dayId,start) &&
+            isPreferredAtOffset(first,weekPlan,dayId,secondStart) &&
+            isPreferredAtOffset(second,weekPlan,dayId,secondStart);
+          if(bothAvailable) break;
+          start+=DOUBLE_BLOCK_MINUTES;
+        }
+
+        if(start>=BATTLE_DURATION_MINUTES-DOUBLE_BLOCK_MINUTES) return null;
+
+        const secondStart=start+DOUBLE_BLOCK_MINUTES;
+        const timingDistance=
+          Math.abs(start-(firstTarget.preferredOffsetMinutes||0)) +
+          Math.abs(secondStart-(secondTarget.preferredOffsetMinutes||0));
+
+        return {
+          ...pairChoice,
+          startOffsetMinutes:start,
+          flowCost:timingDistance+Math.floor(start/4),
+        };
+      }).filter(Boolean).sort((a,b)=>
+        a.flowCost-b.flowCost ||
+        a.startOffsetMinutes-b.startOffsetMinutes ||
+        a.orderIndex-b.orderIndex
+      );
+
+      const best=choices[0];
+      if(!best){
+        return {
+          targetIsland:20,
+          missionVp:60,
+          missionRp:42,
+          totalSpareAttacks:missionLoad.spareAttacks,
+          assignments:[],
+          complete:false,
+        };
+      }
+
+      const firstOffset=best.startOffsetMinutes;
+      const secondOffset=firstOffset+DOUBLE_BLOCK_MINUTES;
+      const makeAssignment=(sparePlayer,partner,target,offset)=>({
+        sparePlayerId:sparePlayer.id,
+        partnerPlayerId:partner.id,
+        targetSector:target.sector,
+        targetMissionLevel:target.missionLevel,
+        spareAttacks:2,
+        suggestedOffsetMinutes:offset,
+        sparePlayerLocalTime:localTimeLabel(sparePlayer,weekPlan,dayId,offset),
+        partnerLocalTime:localTimeLabel(partner,weekPlan,dayId,offset),
+        utcTime:utcTimeLabel(weekPlan,dayId,offset),
+      });
+
+      const sharedAssignments=[
+        makeAssignment(first,second,best.firstTarget,firstOffset),
+        makeAssignment(second,first,best.secondTarget,secondOffset),
+      ];
+
+      return {
+        targetIsland:20,
+        missionVp:60,
+        missionRp:42,
+        totalSpareAttacks:missionLoad.spareAttacks,
+        assignments:sharedAssignments,
+        complete:true,
+      };
+    }
+
     const assignments = [];
     let targetIndex = 0;
 
@@ -402,6 +672,19 @@ window.GWPlannerEngine = (() => {
     };
   }
 
+  // Exact PvZ mission-strength levels from the JJ day-by-day plan.
+  function jjMissionLevel(island,row,column,kind) {
+    if(kind !== "PVZ") return null;
+    const number=Number.parseInt(island,10);
+    const base=({11:48,18:49,12:50,19:51,20:52})[number];
+    if(!base) return null;
+    const sector=island.slice(-1);
+    const pairOffset=sector==="C"
+      ? Math.floor(column/2)
+      : (column>=3?1:0);
+    return base+row+pairOffset;
+  }
+
   function fullTemplate(island, activePositions = null) {
     const sector = island.slice(-1);
     const columns = sector === "C" ? 4 : 6;
@@ -416,7 +699,8 @@ window.GWPlannerEngine = (() => {
         const number = Number.parseInt(island,10);
         const isMaxPvz = number === 20 && row === 1 && kind === "PVZ" &&
           (sector === "C" ? column === 2 : column === 3 || column === 4);
-        missions.push({ island,row,column,kind,active,isMaxPvz,playerId:null });
+        const missionLevel=jjMissionLevel(island,row,column,kind);
+        missions.push({ island,row,column,kind,missionLevel,active,isMaxPvz,playerId:null });
       });
     }
     return { island,rows:2,columns,missions };
@@ -435,7 +719,7 @@ window.GWPlannerEngine = (() => {
     if (selected.length !== dayPlan.teamSize) return [];
 
     const missionLoad = MISSION_LOADS[dayPlan.teamSize];
-    const loadsList = createAttackLoads(players,dayPlan);
+    const loadsList = createAttackLoads(players,dayPlan,weekPlan,dayId);
     const loads = new Map(loadsList.map(x => [x.playerId,x]));
     if (loads.size !== selected.length) return [];
 
@@ -617,6 +901,14 @@ window.GWPlannerEngine = (() => {
         hasPreferredSlot(p,current,day.id)
       );
       const retained=new Set(dp.playerIds);
+      const stackingOverlap=new Map(
+        available.map(player=>[
+          player.id,
+          load.requiresStacking
+            ? bestPartnerOverlapSlots(player,available,current,day.id)
+            : 0,
+        ])
+      );
 
       const pvpCandidates=available.filter(pvpCapable).sort((a,b)=>{
         const ar=retained.has(a.id)?0:1, br=retained.has(b.id)?0:1;
@@ -634,6 +926,8 @@ window.GWPlannerEngine = (() => {
       });
 
       const generalCandidates=[...available].sort((a,b)=>{
+        const ao=stackingOverlap.get(a.id)||0,bo=stackingOverlap.get(b.id)||0;
+        if(ao!==bo) return bo-ao;
         const ar=retained.has(a.id)?0:1, br=retained.has(b.id)?0:1;
         if(ar!==br) return ar-br;
         const ap=timingPenalty(a,current,day.id,0);
@@ -709,7 +1003,7 @@ window.GWPlannerEngine = (() => {
   function playerVpTargets(players, weekPlan, dayId) {
     const dayPlan=weekPlan.days[dayId];
     const islands=createIslandAssignments(players,weekPlan,dayId);
-    const loads=new Map(createAttackLoads(players,dayPlan).map(x=>[x.playerId,x]));
+    const loads=new Map(createAttackLoads(players,dayPlan,weekPlan,dayId).map(x=>[x.playerId,x]));
     const totals=new Map(dayPlan.playerIds.map(id=>[id,0]));
     islands.forEach(island=>{
       island.missions.forEach(m=>{
@@ -729,12 +1023,13 @@ window.GWPlannerEngine = (() => {
       if(dp.teamSize===0) return dp.playerIds.length===0 && dp.pvpCorePlayerIds.length===0;
       return dp.playerIds.length===dp.teamSize &&
         new Set(dp.playerIds).size===dp.teamSize &&
-        createAttackLoads(players,dp).length===dp.teamSize;
+        createAttackLoads(players,dp,plan,day.id).length===dp.teamSize;
     });
   }
 
   return {
     ATTACKS_PER_PLAYER,
+    ATTACK_DURATION_MINUTES,
     MAX_DAYS_PER_PLAYER,
     BATTLE_START_UTC_MINUTES,
     BATTLE_DURATION_MINUTES,
