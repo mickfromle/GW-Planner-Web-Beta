@@ -3,6 +3,12 @@
   const E = window.GWPlannerEngine;
   const KEY = "gw_planner_web_beta_v1";
   const byId = id => document.getElementById(id);
+  function makePlayerId(suffix) {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+    } catch (_) {}
+    return "p" + Date.now() + "_" + Math.random().toString(36).slice(2,10) + (suffix ? "_" + suffix : "");
+  }
   const el = {
     weekTabs:byId("weekTabs"), weekStart:byId("weekStart"), teamSizeGrid:byId("teamSizeGrid"),
     saveSetupBtn:byId("saveSetupBtn"), playerCount:byId("playerCount"), playerList:byId("playerList"),
@@ -52,7 +58,7 @@
       if(raw.length>=3) break;
       raw+=ch;
     }
-    while(raw.length<3) raw+=raw.at(-1)||"P";
+    while(raw.length<3) raw+=(raw.length ? raw[raw.length-1] : "P");
     return normalizeShortCode(raw);
   }
   function uniqueShortCode(name, preferred, used) {
@@ -500,7 +506,7 @@
   function closePlayer() { if (el.playerDialog.open) el.playerDialog.close(); }
   function savePlayer(event) {
     event.preventDefault();
-    const id=el.playerId.value || (crypto.randomUUID ? crypto.randomUUID() : "p"+Date.now());
+    const id=el.playerId.value || makePlayerId();
     const existing=state.players.find(x=>x.id===id);
     const previousLinkedIds=existing?.linkedAccountIds || [];
     const name=el.playerName.value.trim(); if (!name) return;
@@ -1003,7 +1009,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -1387,7 +1393,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -1742,7 +1748,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -2130,7 +2136,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -2464,7 +2470,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -2819,7 +2825,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -3174,7 +3180,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -3562,7 +3568,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -3904,7 +3910,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -4259,7 +4265,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -4614,7 +4620,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
@@ -5002,7 +5008,7 @@
 
       const existing=existingByName.get(key)||null;
       parsed.push({
-        id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
+        id:existing?.id||makePlayerId(rowNo),
         name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
         preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
         linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
