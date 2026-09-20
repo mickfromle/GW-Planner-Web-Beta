@@ -1190,7 +1190,11 @@
     if(el.playerShortCode.value!==normalized) el.playerShortCode.value=normalized;
   };
   el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
-  el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
+  el.playerCountry.onchange=()=>{
+    const linkedIds=selectedLinkedAccounts();
+    populateZones(el.playerCountry.value,null,true);
+    renderLinkedAccounts(el.playerId.value || null,linkedIds);
+  };
   el.playerTimeZone.onchange=setDefaultWindow;
   el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
   setDefaultWindow();renderAll();
