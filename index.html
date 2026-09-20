@@ -56,7 +56,10 @@
             <h2>Players</h2>
             <div id="playerCount" class="muted"></div>
           </div>
-          <button id="addPlayerBtn" class="btn btn-primary">+ PLAYER</button>
+          <div class="section-actions">
+            <button id="playerDataBtn" class="btn btn-secondary">PLAYER DATA</button>
+            <button id="addPlayerBtn" class="btn btn-primary">+ PLAYER</button>
+          </div>
         </div>
         <div class="muted compact">
           Availability is saved per week. Country and time zone are used to calculate each player's real local play window.
@@ -88,6 +91,32 @@
       </section>
     </main>
   </div>
+
+  <dialog id="playerDataDialog" class="modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="section-kicker">PLAYERS</div>
+          <h2>Player data / backup</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-player-data>×</button>
+      </div>
+
+      <div class="data-actions">
+        <button id="downloadPlayerTemplateBtn" type="button" class="btn btn-secondary">DOWNLOAD PLAYER TEMPLATE</button>
+        <button id="importPlayersBtn" type="button" class="btn btn-secondary">IMPORT PLAYERS</button>
+        <button id="createBackupBtn" type="button" class="btn btn-secondary">CREATE BACKUP</button>
+        <button id="restoreBackupBtn" type="button" class="btn btn-secondary">RESTORE BACKUP</button>
+      </div>
+
+      <input id="playerWorkbookInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+      <input id="backupInput" type="file" accept=".gwtactics,.json,application/json" class="hidden">
+
+      <div class="muted compact">
+        The Excel template uses dropdowns for all player fields except Account Name. Linked Account dropdowns use the names entered in the same workbook.
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="playerDialog" class="modal">
     <form id="playerForm" method="dialog" class="modal-card">
@@ -221,6 +250,8 @@
   <script src="https://cdn.jsdelivr.net/npm/moment@2.30.1/min/moment.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/moment-timezone@0.5.48/builds/moment-timezone-with-data-1970-2030.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="./data.js"></script>
   <script src="./planner-engine.js"></script>
   <script src="./app.js"></script>
