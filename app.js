@@ -923,8 +923,19 @@
         alert("No valid players were found.\n\n"+plan.warnings.slice(0,8).join("\n"));
         return;
       }
-      let message=plan.newCount+" new · "+plan.updateCount+" updates · "+plan.warnings.length+" warnings\n\nImport the valid rows now?";
-      if(plan.warnings.length)message+="\n\n"+plan.warnings.slice(0,6).join("\n");
+      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
+      const links=plan.parsed
+        .filter(p=>p.linkedNames.length)
+        .map(p=>p.name+" → "+p.linkedNames.join(", "));
+
+      let message=plan.newCount+" new · "+plan.updateCount+" updates · "+plan.warnings.length+" warnings";
+      if(newNames.length)message+="\n\nNEW\n"+newNames.slice(0,10).map(x=>"• "+x).join("\n")+(newNames.length>10?"\n… +"+(newNames.length-10):"");
+      if(updateNames.length)message+="\n\nUPDATE\n"+updateNames.slice(0,10).map(x=>"• "+x).join("\n")+(updateNames.length>10?"\n… +"+(updateNames.length-10):"");
+      if(links.length)message+="\n\nLINKED ACCOUNTS\n"+links.slice(0,8).map(x=>"• "+x).join("\n")+(links.length>8?"\n… +"+(links.length-8):"");
+      if(plan.warnings.length)message+="\n\nWARNINGS\n"+plan.warnings.slice(0,6).map(x=>"• "+x).join("\n")+(plan.warnings.length>6?"\n… +"+(plan.warnings.length-6):"");
+      message+="\n\nImport the valid rows now?";
+
       if(confirm(message)){
         applyWorkbookImport(plan);
         toast("Player import completed.");
