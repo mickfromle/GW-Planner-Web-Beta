@@ -722,7 +722,7 @@
       .slice()
       .sort()
       .map(id=>id.split("/").map(x=>x.replaceAll("_"," ")).join(" · ")+" ["+id+"]");
-    const roles=["PvP","PvZ","Both"];
+    const roles=["PvP","PvZ","both"];
     const strengths=["1","2","3","4","5"];
     const doubleOptions=[
       "Preferred for double attacks",
