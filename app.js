@@ -768,8 +768,10 @@
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),colors=colorMap(w,dayId);
     const stack=E.createStackPlan(state.players,w,dayId),vp=E.playerVpTargets(state.players,w,dayId);
+    const timelineOrder=new Map(E.createTimeline(state.players,w,dayId).map((x,i)=>[x.playerId,i]));
+    const orderedPlayerIds=[...dp.playerIds].sort((a,b)=>(timelineOrder.get(a)??999999)-(timelineOrder.get(b)??999999));
     let out='<div class="assignments-block"><div class="section-title assignments-title"><span>PLAYER ASSIGNMENTS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table"><thead><tr><th>PLAYER</th><th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
-    dp.playerIds.forEach(id=>{
+    orderedPlayerIds.forEach(id=>{
       const p=players.get(id),l=loads.get(id),stacks=(stack?stack.assignments:[])
         .filter(x=>x.sparePlayerId===id||(x.partnerPlayerId===id&&(l?.spareAttacks||0)>0))
         .map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks)
