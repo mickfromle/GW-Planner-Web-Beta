@@ -378,9 +378,8 @@
     if (resetWindow) setDefaultWindow();
   }
   function setDefaultWindow() {
-    const range=E.defaultPreferredWindow(el.playerTimeZone.value || "UTC");
-    el.playStart.value=String(Math.round(range[0]/30)*30 % 1440);
-    let end=Math.round(range[1]/30)*30; if (end===0) end=1440; el.playEnd.value=String(Math.min(1440,end));
+    el.playStart.value=String(8*60);
+    el.playEnd.value=String(23*60);
   }
   function renderLinkedAccounts(currentId,selectedIds=[]) {
     const selected=new Set(selectedIds || []);
