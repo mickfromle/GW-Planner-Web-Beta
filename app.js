@@ -732,10 +732,28 @@
     const w=week(),hasAssignments=D.DAYS.some(d=>w.days[d.id].playerIds.length>0),valid=hasAssignments&&E.isPlanValid(state.players,w);
     el.autoPlanBtn.textContent=hasAssignments?"REPLAN WEEK "+w.week:"AUTO PLAN WEEK "+w.week;
     el.planSection.classList.toggle("hidden",!valid); if(!valid)return;
-    if(!w.days[selectedDay])selectedDay=D.DAYS[0].id;
+    const previewAvailable=d=>{
+      const dp=w.days[d.id];
+      return !!dp && dp.teamSize>0 && Array.isArray(dp.playerIds) && dp.playerIds.length>0;
+    };
+    if(!w.days[selectedDay] || !previewAvailable(D.DAYS.find(d=>d.id===selectedDay)||D.DAYS[0])){
+      const first=D.DAYS.find(previewAvailable);
+      selectedDay=first?first.id:D.DAYS[0].id;
+    }
     el.planTitle.textContent="Week "+w.week+" preview";
     el.dayTabs.innerHTML="";
-    D.DAYS.forEach(d=>{const b=document.createElement("button");b.type="button";b.className="tab"+(d.id===selectedDay?" active":"");b.textContent=d.short;b.onclick=()=>{selectedDay=d.id;renderPlan();};el.dayTabs.appendChild(b);});
+    D.DAYS.forEach(d=>{
+      const available=previewAvailable(d);
+      const b=document.createElement("button");
+      b.type="button";
+      b.className="tab"+(d.id===selectedDay&&available?" active":"");
+      b.textContent=d.short;
+      b.disabled=!available;
+      b.classList.toggle("disabled",!available);
+      b.style.opacity=available?"1":"0.45";
+      if(available)b.onclick=()=>{selectedDay=d.id;renderPlan();};
+      el.dayTabs.appendChild(b);
+    });
     selectedView="MAP";
     el.viewTabs.innerHTML="";
     el.viewTabs.classList.add("hidden");
@@ -745,7 +763,12 @@
   function openExport() {
     const w=week(); if(!E.isPlanValid(state.players,w))return toast("Create a complete plan first.");
     el.exportRange.innerHTML="";
-    D.DAYS.forEach(d=>{const o=document.createElement("option");o.value=d.id;o.textContent=d.label;o.selected=d.id===selectedDay;el.exportRange.appendChild(o);});
+    const exportDays=D.DAYS.filter(d=>{
+      const dp=w.days[d.id];
+      return !!dp && dp.teamSize>0 && Array.isArray(dp.playerIds) && dp.playerIds.length>0;
+    });
+    if(!exportDays.length)return toast("No playable day has a plan yet.");
+    exportDays.forEach(d=>{const o=document.createElement("option");o.value=d.id;o.textContent=d.label;o.selected=d.id===selectedDay;el.exportRange.appendChild(o);});
     const all=document.createElement("option");all.value="WEEK";all.textContent="Whole week";el.exportRange.appendChild(all);
     el.exportStatus.textContent="";el.exportDialog.showModal();
   }
@@ -762,7 +785,9 @@
     event.preventDefault();
     const views=[...el.exportForm.querySelectorAll('input[name="exportView"]:checked')].map(x=>x.value);
     if(!views.length){el.exportStatus.textContent="Select at least one screenshot.";return;}
-    const w=week(),range=el.exportRange.value,days=range==="WEEK"?D.DAYS.map(d=>d.id):[range],total=days.length*views.length,files=[];
+    const w=week(),range=el.exportRange.value,days=range==="WEEK"
+      ? D.DAYS.filter(d=>{const dp=w.days[d.id];return !!dp&&dp.teamSize>0&&Array.isArray(dp.playerIds)&&dp.playerIds.length>0;}).map(d=>d.id)
+      : [range],total=days.length*views.length,files=[];
     try{
       for(const d of days)for(const v of views){el.exportStatus.textContent="Creating screenshot "+(files.length+1)+" of "+total+"…";files.push(await captureFile(w,d,v));}
       el.exportStatus.textContent="Ready.";
