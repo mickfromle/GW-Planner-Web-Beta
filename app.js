@@ -8,7 +8,8 @@
     saveSetupBtn:byId("saveSetupBtn"), playerCount:byId("playerCount"), playerList:byId("playerList"),
     addPlayerBtn:byId("addPlayerBtn"), playerDataBtn:byId("playerDataBtn"), autoPlanBtn:byId("autoPlanBtn"), planSection:byId("planSection"),
     planTitle:byId("planTitle"), dayTabs:byId("dayTabs"), viewTabs:byId("viewTabs"),
-    planPreview:byId("planPreview"), exportBtn:byId("exportBtn"), playerDialog:byId("playerDialog"),
+    planPreview:byId("planPreview"), openPreviewBtn:byId("openPreviewBtn"), planPreviewDialog:byId("planPreviewDialog"),
+    exportBtn:byId("exportBtn"), playerDialog:byId("playerDialog"),
     playerForm:byId("playerForm"), playerDialogTitle:byId("playerDialogTitle"), playerId:byId("playerId"),
     playerName:byId("playerName"), playerShortCode:byId("playerShortCode"), playerColor:byId("playerColor"), playerColorPalette:byId("playerColorPalette"), countrySearch:byId("countrySearch"), playerCountry:byId("playerCountry"),
     timeZoneField:byId("timeZoneField"), playerTimeZone:byId("playerTimeZone"), playerRole:byId("playerRole"),
@@ -573,7 +574,7 @@
       selectedView="MAP";
 
       renderPlan();
-      el.planSection.scrollIntoView({behavior:"smooth",block:"start"});
+      if(el.planPreviewDialog && !el.planPreviewDialog.open) el.planPreviewDialog.showModal();
 
       if (!hadAssignments) toast("Week "+weekNumber+" planned.");
       else if (unchanged) toast("Week "+weekNumber+" recalculated · no changes needed.");
@@ -1191,6 +1192,8 @@
 
   function renderAll(){renderWeeks();renderSetup();renderPlayers();renderPlan();}
   el.saveSetupBtn.onclick=()=>saveSetup(true); el.addPlayerBtn.onclick=()=>openPlayer(); el.playerDataBtn.onclick=()=>el.playerDataDialog.showModal(); el.autoPlanBtn.onclick=createPlan; el.exportBtn.onclick=openExport;
+  el.openPreviewBtn.onclick=()=>{renderPlan();if(!el.planPreviewDialog.open)el.planPreviewDialog.showModal();};
+  document.querySelectorAll("[data-close-plan-preview]").forEach(x=>x.onclick=()=>el.planPreviewDialog.close());
   el.playerForm.addEventListener("submit",savePlayer); el.deletePlayerBtn.onclick=deletePlayer; el.exportForm.addEventListener("submit",exportSelected);
   document.querySelectorAll("[data-close-player]").forEach(x=>x.onclick=closePlayer);
   document.querySelectorAll("[data-close-player-data]").forEach(x=>x.onclick=()=>el.playerDataDialog.close());
