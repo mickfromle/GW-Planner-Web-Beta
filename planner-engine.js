@@ -998,20 +998,22 @@ window.GWPlannerEngine = (() => {
           return kind === "PVP" ? l?.pvpAttacks > 0 : l?.pvzAttacks > 0;
         })
         .sort((a,b) => {
-          const at = preferredOffsets.get(a.id) ?? 999999;
-          const bt = preferredOffsets.get(b.id) ?? 999999;
-          if (at !== bt) return at-bt;
           if (kind === "PVP") {
+            // Closing priority: non-core/weaker PvP first, strongest core
+            // players last so 5-star cores receive the closing missions.
             const ac = coreSet.has(a.id) ? 1 : 0;
             const bc = coreSet.has(b.id) ? 1 : 0;
             if (ac !== bc) return ac-bc;
+            if ((a.pvpStars||0)!==(b.pvpStars||0)) return (a.pvpStars||0)-(b.pvpStars||0);
+            const at = preferredOffsets.get(a.id) ?? 999999;
+            const bt = preferredOffsets.get(b.id) ?? 999999;
+            if (at !== bt) return at-bt;
           } else {
+            const at = preferredOffsets.get(a.id) ?? 999999;
+            const bt = preferredOffsets.get(b.id) ?? 999999;
+            if (at !== bt) return at-bt;
             const rank = r => r === "PVZ" ? 0 : r === "BOTH" ? 1 : 2;
             if (rank(a.role)!==rank(b.role)) return rank(a.role)-rank(b.role);
-          }
-          if (kind === "PVP") {
-            if ((a.pvpStars||0)!==(b.pvpStars||0)) return (b.pvpStars||0)-(a.pvpStars||0);
-          } else {
             if ((a.pvpStars||0)!==(b.pvpStars||0)) return (a.pvpStars||0)-(b.pvpStars||0);
           }
           return byName(a,b);
