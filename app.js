@@ -775,9 +775,12 @@
     out+='</div>';
     if(stack){
       out+='<div class="section-title">STACKING PLAN</div><div class="stack-list">';
+      const canonical=stack.assignments[0]||null;
       stack.assignments.forEach(x=>{
-        const spareName=(players.get(x.sparePlayerId)||{}).name||x.sparePlayerId;
-        const partnerName=(players.get(x.partnerPlayerId)||{}).name||x.partnerPlayerId;
+        const firstId=canonical?.sparePlayerId||x.sparePlayerId;
+        const secondId=canonical?.partnerPlayerId||x.partnerPlayerId;
+        const spareName=(players.get(firstId)||{}).name||firstId;
+        const partnerName=(players.get(secondId)||{}).name||secondId;
         const shared=(loads.get(x.sparePlayerId)?.spareAttacks||0)>0&&(loads.get(x.partnerPlayerId)?.spareAttacks||0)>0;
         const detail=shared
           ? '<strong>'+esc(spareName)+'</strong> + '+esc(partnerName)+' · '+esc(x.targetSector)+' · '+x.spareAttacks+' attacks'
