@@ -377,9 +377,52 @@
     el.timeZoneField.classList.toggle("hidden", el.playerTimeZone.options.length<=1);
     if (resetWindow) setDefaultWindow();
   }
+  function localMinutesForInstant(instant,timeZone) {
+    try {
+      const parts=new Intl.DateTimeFormat("en-US",{
+        timeZone,
+        hour:"2-digit",
+        minute:"2-digit",
+        hourCycle:"h23",
+      }).formatToParts(instant);
+      let hour=Number(parts.find(p=>p.type==="hour")?.value || 0);
+      if(hour===24) hour=0;
+      const minute=Number(parts.find(p=>p.type==="minute")?.value || 0);
+      return hour*60+minute;
+    } catch (_) {
+      return instant.getUTCHours()*60+instant.getUTCMinutes();
+    }
+  }
   function setDefaultWindow() {
-    el.playStart.value=String(8*60);
-    el.playEnd.value=String(23*60);
+    const zone=el.playerTimeZone.value || "UTC";
+    const currentWeek=week();
+    const iso=currentWeek?.weekStart || E.nextTuesdayIso();
+    const [y,m,d]=iso.split("-").map(Number);
+    const startUtcMinutes=currentWeek?.battleStartUtcMinutes ?? E.BATTLE_START_UTC_MINUTES;
+    const start=new Date(Date.UTC(
+      y,m-1,d,
+      Math.floor(startUtcMinutes/60),
+      startUtcMinutes%60
+    ));
+    const end=new Date(start.getTime()+E.BATTLE_DURATION_MINUTES*60000);
+    const startMinutes=localMinutesForInstant(start,zone);
+    const endMinutes=localMinutesForInstant(end,zone);
+
+    el.playStart.innerHTML="";
+    el.playEnd.innerHTML="";
+
+    const startOption=document.createElement("option");
+    startOption.value=String(startMinutes);
+    startOption.textContent="From "+String(Math.floor(startMinutes/60)).padStart(2,"0")+":"+String(startMinutes%60).padStart(2,"0");
+    el.playStart.appendChild(startOption);
+
+    const endOption=document.createElement("option");
+    endOption.value=String(endMinutes);
+    endOption.textContent="Until "+String(Math.floor(endMinutes/60)).padStart(2,"0")+":"+String(endMinutes%60).padStart(2,"0");
+    el.playEnd.appendChild(endOption);
+
+    el.playStart.disabled=true;
+    el.playEnd.disabled=true;
   }
   function renderLinkedAccounts(currentId,selectedIds=[]) {
     const selected=new Set(selectedIds || []);
@@ -446,7 +489,7 @@
     el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
     el.doublePreference.value=p?.doubleAttackPreference || (p?.preferredSpare?"PREFERRED":"ALLOWED");
     renderLinkedAccounts(p?.id || null,p?.linkedAccountIds || []);
-    if (p) { el.playStart.value=String(p.preferredStartMinutes); el.playEnd.value=String(p.preferredEndMinutes); } else setDefaultWindow();
+    setDefaultWindow();
     el.deletePlayerBtn.classList.toggle("hidden",!p); el.playerDialog.showModal();
   }
   function closePlayer() { if (el.playerDialog.open) el.playerDialog.close(); }
@@ -1150,7 +1193,7 @@
   el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
   el.playerTimeZone.onchange=setDefaultWindow;
   el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
-  fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
+  setDefaultWindow();renderAll();
 })();
 +candidateRow+'<>Players!$A
 
