@@ -723,7 +723,11 @@
   function mapView(w,dayId) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const load=D.MISSION_LOADS[dp.teamSize],islands=E.createIslandAssignments(state.players,w,dayId),colors=colorMap(w,dayId),players=new Map(state.players.map(p=>[p.id,p])),stack=E.createStackPlan(state.players,w,dayId);
-    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+load.pvpAttacks+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+load.pvzAttacks+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+load.spareAttacks+'</strong><span>STACK ATTACKS</span></div></div>';
+    const attackLoads=E.createAttackLoads(state.players,dp,w,dayId);
+    const actualPvp=attackLoads.reduce((sum,x)=>sum+(x.pvpAttacks||0),0);
+    const actualPvz=attackLoads.reduce((sum,x)=>sum+(x.pvzAttacks||0),0);
+    const actualStack=attackLoads.reduce((sum,x)=>sum+(x.spareAttacks||0),0);
+    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+actualPvp+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+actualPvz+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+actualStack+'</strong><span>STACK ATTACKS</span></div></div>';
     out+='<div class="sector-plan"><div><span>SECTOR PLAN</span><strong>'+esc(load.maxSectorPlan)+'</strong></div><div class="sector-score">MAX VP '+load.maxVp+' <b>·</b> SECTOR SCORE '+load.maxSectorScore+'</div></div><div class="section-title section-title-line"><span>ISLAND ASSIGNMENTS</span></div>';
     const islandNumbers=[...new Set(islands.map(island=>Number(String(island.island).slice(0,-1))))].sort((a,b)=>a-b);
     out+='<div class="island-grid" style="--island-groups:'+Math.max(1,islandNumbers.length)+'">';
