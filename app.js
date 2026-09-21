@@ -725,9 +725,9 @@
     const load=D.MISSION_LOADS[dp.teamSize],islands=E.createIslandAssignments(state.players,w,dayId),colors=colorMap(w,dayId),players=new Map(state.players.map(p=>[p.id,p])),stack=E.createStackPlan(state.players,w,dayId);
     const attackLoads=E.createAttackLoads(state.players,dp,w,dayId);
     const actualPvp=attackLoads.reduce((sum,x)=>sum+(x.pvpAttacks||0),0);
-    const actualPvz=attackLoads.reduce((sum,x)=>sum+(x.pvzAttacks||0),0);
-    const actualStack=attackLoads.reduce((sum,x)=>sum+(x.spareAttacks||0),0);
-    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+actualPvp+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+actualPvz+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+actualStack+'</strong><span>STACK ATTACKS</span></div></div>';
+    const actualPvz=attackLoads.reduce((sum,x)=>sum+(x.pvzAttacks||0)+(x.spareAttacks||0),0);
+    const totalAttacks=actualPvp+actualPvz;
+    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+actualPvp+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+actualPvz+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+totalAttacks+'</strong><span>TOTAL ATTACKS</span></div></div>';
     out+='<div class="sector-plan"><div><span>SECTOR PLAN</span><strong>'+esc(load.maxSectorPlan)+'</strong></div><div class="sector-score">MAX VP '+load.maxVp+' <b>·</b> SECTOR SCORE '+load.maxSectorScore+'</div></div><div class="section-title section-title-line"><span>ISLAND ASSIGNMENTS</span></div>';
     const islandNumbers=[...new Set(islands.map(island=>Number(String(island.island).slice(0,-1))))].sort((a,b)=>a-b);
     out+='<div class="island-grid" style="--island-groups:'+Math.max(1,islandNumbers.length)+'">';
@@ -781,7 +781,7 @@
         .map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks)
         .join(" / ")||"—";
       const color=colors.get(id)||"#373e42",code=p?playerCode(p):id.slice(0,3).toUpperCase();
-      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
+      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?(l.pvzAttacks||0)+(l.spareAttacks||0):0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
     });
     return out+'</tbody></table></div></div>';
   }
