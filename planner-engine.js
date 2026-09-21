@@ -363,7 +363,7 @@ window.GWPlannerEngine = (() => {
     });
 
     const doubleEligible=selected.filter(canDouble);
-    if(missionLoad.spareAttacks>0 && !doubleEligible.length) return [];
+    if(missionLoad.spareAttacks>0 && doubleEligible.length<2) return [];
 
     const linkedEligibleCount=new Map(
       doubleEligible.map(player=>[
@@ -399,11 +399,9 @@ window.GWPlannerEngine = (() => {
 
     const targetMissions = new Map(selected.map(p => [p.id,ATTACKS_PER_PLAYER]));
 
-    // 8v8: four DOUBLE missions are played by one two-player pair.
-    // Each DOUBLE mission consumes one attack from both players, so
-    // both participants must reserve four attacks and have 14 normal
-    // attacks left for the regular island assignments.
-    if (dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4) {
+    // Every DOUBLE mission consumes one attack from both players.
+    // Reserve all required double attacks on one coordinated pair.
+    if (missionLoad.spareAttacks > 0) {
       const timePair = weekPlan && dayId
         ? bestDoubleAttackPair(doubleEligible,weekPlan,dayId,coreSet)
         : null;
@@ -426,30 +424,16 @@ window.GWPlannerEngine = (() => {
           return byName(a,b);
         })[0];
       if (!partner) return [];
+
       for (const player of [anchor,partner]) {
         const current = targetMissions.get(player.id);
-        const doubleAttacksPerPlayer = missionLoad.spareAttacks;
-        if (current < doubleAttacksPerPlayer) return [];
-        targetMissions.set(player.id,current - doubleAttacksPerPlayer);
-      }
-    } else {
-      let spareRemaining = missionLoad.spareAttacks;
-      let spareIndex = 0;
-      while (spareRemaining > 0) {
-        const player = spareOrder[spareIndex % spareOrder.length];
-        const chunk = Math.min(2,spareRemaining);
-        const current = targetMissions.get(player.id);
-        if (current < chunk) return [];
-        targetMissions.set(player.id,current - chunk);
-        spareRemaining -= chunk;
-        spareIndex++;
+        if (current < missionLoad.spareAttacks) return [];
+        targetMissions.set(player.id,current - missionLoad.spareAttacks);
       }
     }
 
     const missionCount =
-      dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4
-        ? missionLoad.pvpAttacks + missionLoad.pvzAttacks - missionLoad.spareAttacks
-        : missionLoad.pvpAttacks + missionLoad.pvzAttacks;
+      missionLoad.pvpAttacks + missionLoad.pvzAttacks - missionLoad.spareAttacks;
     if ([...targetMissions.values()].reduce((a,b)=>a+b,0) !== missionCount) return [];
 
     const pvpIds = new Set(pvpOrder.map(p => p.id));
@@ -474,9 +458,7 @@ window.GWPlannerEngine = (() => {
     if (remainingPvp > 0) return [];
 
     let remainingPvz =
-      dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4
-        ? missionLoad.pvzAttacks - missionLoad.spareAttacks
-        : missionLoad.pvzAttacks;
+      missionLoad.pvzAttacks - missionLoad.spareAttacks;
     const pvzByPlayer = new Map(selected.map(p => [p.id,0]));
     const pvzOrder = [...selected].sort((a,b) => {
       const rank = r => r === "PVZ" ? 0 : r === "BOTH" ? 1 : 2;
@@ -902,36 +884,52 @@ window.GWPlannerEngine = (() => {
       };
     }
 
+    const pair=bestDoubleAttackPair(
+      sparePlayers,
+      weekPlan,
+      dayId,
+      new Set(dayPlan.pvpCorePlayerIds||[])
+    ) || (sparePlayers.length>=2 ? [sparePlayers[0],sparePlayers[1]] : null);
+
+    if(!pair){
+      return {
+        targetIsland:20,
+        missionVp:60,
+        missionRp:42,
+        totalSpareAttacks:missionLoad.spareAttacks,
+        assignments:[],
+        complete:false,
+      };
+    }
+
+    const first=pair[0],second=pair[1];
     const assignments = [];
     let targetIndex = 0;
+    let remaining = missionLoad.spareAttacks;
 
-    sparePlayers.forEach(sparePlayer => {
-      let remaining = loads.get(sparePlayer.id).spareAttacks;
-      while (remaining > 0) {
-        const chunk = Math.min(2,remaining);
-        const target = STACK_TARGETS[targetIndex % STACK_TARGETS.length];
-        const found = findStackOverlap(
-          sparePlayer,
-          selected.filter(p => p.id !== sparePlayer.id && canDouble(p)),
-          weekPlan,
-          dayId,
-          chunk,
-          target,
-        );
-        if (found) assignments.push(found);
-        remaining -= chunk;
-        targetIndex++;
-      }
-    });
+    while (remaining > 0) {
+      const chunk = Math.min(2,remaining);
+      const target = STACK_TARGETS[targetIndex % STACK_TARGETS.length];
+      const found = findStackOverlap(
+        first,
+        [second],
+        weekPlan,
+        dayId,
+        chunk,
+        target,
+      );
+      if (found) assignments.push(found);
+      remaining -= chunk;
+      targetIndex++;
+    }
 
-    const covered = new Set(assignments.map(x => x.sparePlayerId));
     return {
       targetIsland:20,
       missionVp:60,
       missionRp:42,
       totalSpareAttacks:missionLoad.spareAttacks,
       assignments,
-      complete:sparePlayers.every(p => covered.has(p.id)) &&
+      complete:
         assignments.reduce((sum,x)=>sum+x.spareAttacks,0) === missionLoad.spareAttacks,
     };
   }
@@ -994,7 +992,7 @@ window.GWPlannerEngine = (() => {
     }
 
     const stackPlan =
-      dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4
+      missionLoad.requiresStacking
         ? createStackPlan(players,weekPlan,dayId)
         : null;
 
