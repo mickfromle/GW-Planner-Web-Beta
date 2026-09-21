@@ -399,9 +399,10 @@ window.GWPlannerEngine = (() => {
 
     const targetMissions = new Map(selected.map(p => [p.id,ATTACKS_PER_PLAYER]));
 
-    // 8v8: four spare swords are one two-player stack pair.
-    // Each participant spends two attacks. A marked Spare Maker stays
-    // the anchor; the second pair member receives the other two swords.
+    // 8v8: four DOUBLE missions are played by one two-player pair.
+    // Each DOUBLE mission consumes one attack from both players, so
+    // both participants must reserve four attacks and have 14 normal
+    // attacks left for the regular island assignments.
     if (dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4) {
       const timePair = weekPlan && dayId
         ? bestDoubleAttackPair(doubleEligible,weekPlan,dayId,coreSet)
@@ -427,8 +428,9 @@ window.GWPlannerEngine = (() => {
       if (!partner) return [];
       for (const player of [anchor,partner]) {
         const current = targetMissions.get(player.id);
-        if (current < 2) return [];
-        targetMissions.set(player.id,current - 2);
+        const doubleAttacksPerPlayer = missionLoad.spareAttacks;
+        if (current < doubleAttacksPerPlayer) return [];
+        targetMissions.set(player.id,current - doubleAttacksPerPlayer);
       }
     } else {
       let spareRemaining = missionLoad.spareAttacks;
@@ -444,7 +446,10 @@ window.GWPlannerEngine = (() => {
       }
     }
 
-    const missionCount = missionLoad.pvpAttacks + missionLoad.pvzAttacks;
+    const missionCount =
+      dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4
+        ? missionLoad.pvpAttacks + missionLoad.pvzAttacks - missionLoad.spareAttacks
+        : missionLoad.pvpAttacks + missionLoad.pvzAttacks;
     if ([...targetMissions.values()].reduce((a,b)=>a+b,0) !== missionCount) return [];
 
     const pvpIds = new Set(pvpOrder.map(p => p.id));
@@ -468,7 +473,10 @@ window.GWPlannerEngine = (() => {
     });
     if (remainingPvp > 0) return [];
 
-    let remainingPvz = missionLoad.pvzAttacks;
+    let remainingPvz =
+      dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4
+        ? missionLoad.pvzAttacks - missionLoad.spareAttacks
+        : missionLoad.pvzAttacks;
     const pvzByPlayer = new Map(selected.map(p => [p.id,0]));
     const pvzOrder = [...selected].sort((a,b) => {
       const rank = r => r === "PVZ" ? 0 : r === "BOTH" ? 1 : 2;
@@ -785,14 +793,15 @@ window.GWPlannerEngine = (() => {
     const loads = new Map(createAttackLoads(players,dayPlan,weekPlan,dayId).map(x => [x.playerId,x]));
     const sparePlayers = selected.filter(p => (loads.get(p.id)?.spareAttacks || 0) > 0);
 
-    // 8v8 uses one shared pair with two attacks each. Time-zone overlap
-    // has priority. A/B remain the early default; 20D becomes preferable
-    // when the pair's common play window is later in the battle.
+    // 8v8 uses one shared pair for four DOUBLE missions. Both players
+    // reserve four attacks in total. Time-zone overlap has priority.
+    // A/B remain the early default; 20D becomes preferable when the
+    // pair's common play window is later in the battle.
     if (
       dayPlan.teamSize === 8 &&
       missionLoad.spareAttacks === 4 &&
       sparePlayers.length === 2 &&
-      sparePlayers.every(p => (loads.get(p.id)?.spareAttacks || 0) === 2)
+      sparePlayers.every(p => (loads.get(p.id)?.spareAttacks || 0) === 4)
     ) {
       const pair=bestDoubleAttackPair(
         sparePlayers,
@@ -984,6 +993,19 @@ window.GWPlannerEngine = (() => {
       islands.push(fullTemplate("20D",positions));
     }
 
+    const stackPlan =
+      dayPlan.teamSize === 8 && missionLoad.spareAttacks === 4
+        ? createStackPlan(players,weekPlan,dayId)
+        : null;
+
+    const isReservedDoubleMission = mission =>
+      !!stackPlan &&
+      mission.isMaxPvz &&
+      stackPlan.assignments.some(assignment =>
+        assignment.targetSector === mission.island &&
+        assignment.targetMissionLevel === mission.missionLevel
+      );
+
     const preferredOffsets = new Map(selected.map(player => [
       player.id,
       earliestPreferredOffset(player,weekPlan,dayId,0) ?? 999999
@@ -1023,7 +1045,7 @@ window.GWPlannerEngine = (() => {
     ["PVZ","PVP"].forEach(kind => {
       const slots = islands
         .flatMap(x => x.missions)
-        .filter(m => m.active && m.kind === kind)
+        .filter(m => m.active && m.kind === kind && !isReservedDoubleMission(m))
         .sort((a,b) =>
           unlockPhase(a.island)-unlockPhase(b.island) ||
           islandNumber(a.island)-islandNumber(b.island) ||
