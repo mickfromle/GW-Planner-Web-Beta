@@ -282,6 +282,13 @@ window.GWPlannerEngine = (() => {
     return `${p.weekday} ${String(p.hour).padStart(2,"0")}:${String(p.minute).padStart(2,"0")} ${p.zone}`;
   }
 
+  function viewerTimeLabel(weekPlan, dayId, offsetMinutes) {
+    const instant = new Date(battleStartDate(weekPlan,dayId).getTime() + offsetMinutes * 60000);
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const p = localParts(instant,zone);
+    return `${p.weekday} ${String(p.hour).padStart(2,"0")}:${String(p.minute).padStart(2,"0")} ${p.zone}`;
+  }
+
   function utcTimeLabel(weekPlan, dayId, offsetMinutes) {
     const instant = new Date(battleStartDate(weekPlan,dayId).getTime() + offsetMinutes * 60000);
     return `${String(instant.getUTCHours()).padStart(2,"0")}:${String(instant.getUTCMinutes()).padStart(2,"0")} UTC`;
@@ -602,6 +609,7 @@ window.GWPlannerEngine = (() => {
         playerId,
         phase,
         suggestedOffsetMinutes:offset,
+        viewerTimeLabel:viewerTimeLabel(weekPlan,dayId,offset),
         localTimeLabel:localTimeLabel(player,weekPlan,dayId,offset),
         utcTimeLabel:utcTimeLabel(weekPlan,dayId,offset),
         needsStacking:(load?.spareAttacks||0)>0,
