@@ -1312,6 +1312,7 @@ window.GWPlannerEngine = (() => {
     hasPreferredSlot,
     timingPenalty,
     localTimeLabel,
+    viewerTimeLabel,
     utcTimeLabel,
     createAttackLoads,
     createTimeline,
