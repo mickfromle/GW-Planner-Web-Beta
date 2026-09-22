@@ -128,8 +128,6 @@ window.GWPlannerEngine = (() => {
   }
 
   function preferredWindow(player) {
-    const legacy = player.preferredStartMinutes === 8 * 60 && player.preferredEndMinutes === 23 * 60;
-    if (legacy) return defaultPreferredWindow(player.timeZoneId);
     return [
       Number.isFinite(player.preferredStartMinutes) ? player.preferredStartMinutes : defaultPreferredWindow(player.timeZoneId)[0],
       Number.isFinite(player.preferredEndMinutes) ? player.preferredEndMinutes : defaultPreferredWindow(player.timeZoneId)[1],
