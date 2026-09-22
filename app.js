@@ -133,7 +133,7 @@
   }
 
   function freshState() {
-    return { version:1, selectedWeek:1, players:[], weeks:{ "1":E.emptyWeek(1) } };
+    return { version:3, selectedWeek:1, players:[], weeks:{ "1":E.emptyWeek(1) } };
   }
   function loadState() {
     try {
@@ -193,6 +193,17 @@
       });
     });
   }
+
+  if((state.version||1)<3){
+    state.players.forEach(player=>{
+      player.preferredStartMinutes=9*60+30;
+      player.preferredEndMinutes=20*60;
+    });
+    state.version=3;
+    invalidateGeneratedPlans();
+    saveState();
+  }
+
   reconcileGeneratedPlans();
   state.selectedWeek = Math.max(1, Math.min(4, state.selectedWeek || 1));
   let selectedDay = D.DAYS[0].id;
@@ -439,9 +450,9 @@
   }
 
   function setDefaultWindow() {
-    const [start,end]=updateBattleWindowDisplay();
-    el.playStart.value=String(start);
-    el.playEnd.value=String(end);
+    updateBattleWindowDisplay();
+    el.playStart.value=String(9*60+30);
+    el.playEnd.value=String(20*60);
   }
   function renderLinkedAccounts(currentId,selectedIds=[]) {
     const selected=new Set(selectedIds || []);
@@ -1196,11 +1207,10 @@
       entry.zones.forEach(option=>{
         if(seenZoneOptions.has(option))return;
         seenZoneOptions.add(option);
-        const zoneId=timeZoneFromTemplate(option);
         timeDefaults.push([
           option,
-          localTime(battleStart,zoneId),
-          localTime(battleEnd,zoneId)
+          "09:30",
+          "20:00"
         ]);
       });
     });
