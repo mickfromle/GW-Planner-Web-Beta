@@ -122,9 +122,8 @@ window.GWPlannerEngine = (() => {
   }
 
   function defaultPreferredWindow(timeZone) {
-    const start = new Date(Date.UTC(2026,6,1,7,30));
-    const end = new Date(Date.UTC(2026,6,1,20,0));
-    return [localMinutes(start,timeZone), localMinutes(end,timeZone)];
+    void timeZone;
+    return [9 * 60 + 30, 20 * 60];
   }
 
   function preferredWindow(player) {
