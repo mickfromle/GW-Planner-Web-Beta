@@ -848,7 +848,7 @@
       '<div class="sheet-week"><strong>WEEK '+w.week+'</strong><span>'+esc(w.weekStart)+' – '+esc(end)+'</span></div>'+
       '</div>';
   }
-  function mapView(w,dayId) {
+  function mapView(w,dayId,capture=false) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const load=D.MISSION_LOADS[dp.teamSize],islands=E.createIslandAssignments(state.players,w,dayId),colors=colorMap(w,dayId),players=new Map(state.players.map(p=>[p.id,p])),stack=E.createStackPlan(state.players,w,dayId);
     let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+load.pvpAttacks+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+load.pvzAttacks+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+load.spareAttacks+'</strong><span>STACK ATTACKS</span></div></div>';
@@ -890,31 +890,42 @@
       });
       out+='</div></div>';
     });
-    return out+'</div>'+playersView(w,dayId);
+    return out+'</div>'+playersView(w,dayId,capture);
   }
-  function playersView(w,dayId) {
+  function playersView(w,dayId,capture=false) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),colors=colorMap(w,dayId);
     const stack=E.createStackPlan(state.players,w,dayId),vp=E.playerVpTargets(state.players,w,dayId);
-    const timelineOrder=new Map(E.createTimeline(state.players,w,dayId).map((x,i)=>[x.playerId,i]));
+    const timeline=E.createTimeline(state.players,w,dayId);
+    const timelineOrder=new Map(timeline.map((x,i)=>[x.playerId,i]));
+    const timelineByPlayer=new Map(timeline.map(x=>[x.playerId,x]));
     const orderedPlayerIds=[...dp.playerIds].sort((a,b)=>(timelineOrder.get(a)??999999)-(timelineOrder.get(b)??999999));
-    let out='<div class="assignments-block"><div class="section-title assignments-title"><span>PLAYER ASSIGNMENTS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table"><thead><tr><th>PLAYER</th><th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
+    let out='<div class="assignments-block"><div class="section-title assignments-title"><span>PLAYER ASSIGNMENTS</span><small>'+dp.playerIds.length+' PLAYERS</small></div><div class="table-wrap"><table class="assignment-table '+(capture?'export-time-table':'')+'"><thead><tr><th>PLAYER</th>'+(capture?'<th>YOUR / UTC / PLAYER LOCAL</th>':'')+'<th>VPS</th><th>ROLE</th><th>PVP</th><th>PVZ</th><th>STACKING</th></tr></thead><tbody>';
     orderedPlayerIds.forEach(id=>{
       const p=players.get(id),l=loads.get(id),stacks=(stack?stack.assignments:[])
         .filter(x=>x.sparePlayerId===id||(x.partnerPlayerId===id&&(l?.spareAttacks||0)>0))
         .map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks)
         .join(" / ")||"—";
       const color=colors.get(id)||"#373e42",code=p?playerCode(p):id.slice(0,3).toUpperCase();
-      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
+      const t=timelineByPlayer.get(id);
+      const exportTime=t
+        ? esc(t.viewerTimeLabel)+' / '+esc(t.utcTimeLabel)+' / '+esc(t.localTimeLabel)
+        : '—';
+      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td>'+(capture?'<td class="export-time">'+exportTime+'</td>':'')+'<td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
     });
     return out+'</tbody></table></div></div>';
   }
   function phaseLabel(p) { return p==="OPENING"?"OPEN A/B":p==="OPEN_C"?"OPEN C":p==="PVP_SUPPORT"?"PVP SUPPORT":p==="PVP_CORE_AB"?"PVP CORE / A/B":p==="PVP_CORE_C"?"PVP CORE / C":"FLEX / D"; }
-  function timelineView(w,dayId) {
+  function timelineView(w,dayId,capture=false) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),timeline=E.createTimeline(state.players,w,dayId),stack=E.createStackPlan(state.players,w,dayId);
     let out='<div class="section-title">TIMELINE</div><div class="timeline-list">';
-    timeline.forEach(x=>{out+='<div class="timeline-row"><div class="time">'+esc(x.viewerTimeLabel)+' your time · '+esc(x.localTimeLabel)+' player local</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';});
+    timeline.forEach(x=>{
+      const timeText=capture
+        ? esc(x.viewerTimeLabel)+' your time · '+esc(x.utcTimeLabel)+' · '+esc(x.localTimeLabel)+' player local'
+        : esc(x.viewerTimeLabel)+' your time · '+esc(x.localTimeLabel)+' player local';
+      out+='<div class="timeline-row"><div class="time">'+timeText+'</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';
+    });
     out+='</div>';
     if(stack){
       out+='<div class="section-title">STACKING PLAN</div><div class="stack-list">';
@@ -928,7 +939,10 @@
         const detail=shared
           ? '<strong>'+esc(spareName)+'</strong> + '+esc(partnerName)+' · '+esc(x.targetSector)+' · '+x.spareAttacks+' attacks'
           : '<strong>'+esc(spareName)+'</strong> · '+esc(x.targetSector)+' '+x.targetMissionLevel+' x'+x.spareAttacks+' · with '+esc(partnerName);
-        out+='<div class="stack-row"><div class="time">'+esc(x.utcTime)+'</div><div>'+detail+'</div></div>';
+        const stackTime=capture
+          ? esc(E.viewerTimeLabel(w,dayId,x.suggestedOffsetMinutes))+' your time · '+esc(x.utcTime)+' · '+esc(x.sparePlayerLocalTime)+' + '+esc(x.partnerLocalTime)+' player local'
+          : esc(x.utcTime);
+        out+='<div class="stack-row"><div class="time">'+stackTime+'</div><div>'+detail+'</div></div>';
       });
       out+='</div>';
     }
@@ -967,7 +981,7 @@
   }
 
   function sheet(w,dayId,view,capture) {
-    const body=view==="MAP"?mapView(w,dayId):timelineView(w,dayId);
+    const body=view==="MAP"?mapView(w,dayId,capture):timelineView(w,dayId,capture);
     return '<div class="plan-sheet '+(capture?"capture":"")+'">'+sheetHeader(w,dayId)+body+'</div>';
   }
 
