@@ -12,7 +12,7 @@
     playerForm:byId("playerForm"), playerDialogTitle:byId("playerDialogTitle"), playerId:byId("playerId"),
     playerName:byId("playerName"), playerShortCode:byId("playerShortCode"), playerColor:byId("playerColor"), playerColorPalette:byId("playerColorPalette"), countrySearch:byId("countrySearch"), playerCountry:byId("playerCountry"),
     timeZoneField:byId("timeZoneField"), playerTimeZone:byId("playerTimeZone"), playerRole:byId("playerRole"),
-    playerStars:byId("playerStars"), starsField:byId("starsField"), playStart:byId("playStart"),
+    playerStars:byId("playerStars"), starsField:byId("starsField"), battleWindowValue:byId("battleWindowValue"), playStart:byId("playStart"),
     playEnd:byId("playEnd"), linkedAccountsList:byId("linkedAccountsList"), doublePreference:byId("doublePreference"), deletePlayerBtn:byId("deletePlayerBtn"),
     exportDialog:byId("exportDialog"), exportForm:byId("exportForm"), exportRange:byId("exportRange"),
     exportStatus:byId("exportStatus"), toast:byId("toast"), captureRoot:byId("captureRoot"),
@@ -284,8 +284,8 @@
   }
   function fillTimeSelect(select, include24) {
     select.innerHTML = "";
-    const end = include24 ? 1440 : 1410;
-    for (let m=0; m<=end; m+=30) {
+    const end = include24 ? 1440 : 1425;
+    for (let m=0; m<=end; m+=15) {
       const o = document.createElement("option");
       o.value = String(m); o.textContent = formatTime(m); select.appendChild(o);
     }
@@ -398,10 +398,50 @@
     el.timeZoneField.classList.toggle("hidden", el.playerTimeZone.options.length<=1);
     if (resetWindow) setDefaultWindow();
   }
+  function battleWindowForZone(timeZoneId) {
+    const w=week();
+    const iso=E.dateForDay(w,D.DAYS[0].id);
+    const [year,month,day]=iso.split("-").map(Number);
+    const startMinutes=w.battleStartUtcMinutes ?? E.BATTLE_START_UTC_MINUTES;
+    const start=new Date(Date.UTC(
+      year,
+      month-1,
+      day,
+      Math.floor(startMinutes/60),
+      startMinutes%60
+    ));
+    const end=new Date(start.getTime()+E.BATTLE_DURATION_MINUTES*60000);
+    const localMinutesFor=(instant)=>{
+      try{
+        const parts=new Intl.DateTimeFormat("en-GB",{
+          timeZone:timeZoneId || "UTC",
+          hour:"2-digit",
+          minute:"2-digit",
+          hourCycle:"h23"
+        }).formatToParts(instant);
+        let hour=Number(parts.find(p=>p.type==="hour")?.value||0);
+        if(hour===24)hour=0;
+        const minute=Number(parts.find(p=>p.type==="minute")?.value||0);
+        return hour*60+minute;
+      }catch(_){
+        return instant.getUTCHours()*60+instant.getUTCMinutes();
+      }
+    };
+    return [localMinutesFor(start),localMinutesFor(end)];
+  }
+
+  function updateBattleWindowDisplay() {
+    const [start,end]=battleWindowForZone(el.playerTimeZone.value || "UTC");
+    if(el.battleWindowValue){
+      el.battleWindowValue.textContent="From "+formatTime(start)+" · Until "+formatTime(end);
+    }
+    return [start,end];
+  }
+
   function setDefaultWindow() {
-    const range=E.defaultPreferredWindow(el.playerTimeZone.value || "UTC");
-    el.playStart.value=String(Math.round(range[0]/30)*30 % 1440);
-    let end=Math.round(range[1]/30)*30; if (end===0) end=1440; el.playEnd.value=String(Math.min(1440,end));
+    const [start,end]=updateBattleWindowDisplay();
+    el.playStart.value=String(start);
+    el.playEnd.value=String(end);
   }
   function renderLinkedAccounts(currentId,selectedIds=[]) {
     const selected=new Set(selectedIds || []);
@@ -593,7 +633,13 @@
     el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
     el.doublePreference.value=p?.doubleAttackPreference || (p?.preferredSpare?"PREFERRED":"ALLOWED");
     renderLinkedAccounts(p?.id || null,p?.linkedAccountIds || []);
-    if (p) { el.playStart.value=String(p.preferredStartMinutes); el.playEnd.value=String(p.preferredEndMinutes); } else setDefaultWindow();
+    if (p) {
+      el.playStart.value=String(p.preferredStartMinutes);
+      el.playEnd.value=String(p.preferredEndMinutes);
+      updateBattleWindowDisplay();
+    } else {
+      setDefaultWindow();
+    }
     el.deletePlayerBtn.classList.toggle("hidden",!p); el.playerDialog.showModal();
   }
   function closePlayer() { if (el.playerDialog.open) el.playerDialog.close(); }
@@ -857,7 +903,7 @@
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),timeline=E.createTimeline(state.players,w,dayId),stack=E.createStackPlan(state.players,w,dayId);
     let out='<div class="section-title">TIMELINE</div><div class="timeline-list">';
-    timeline.forEach(x=>{out+='<div class="timeline-row"><div class="time">'+esc(x.localTimeLabel)+' · '+esc(x.utcTimeLabel)+'</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';});
+    timeline.forEach(x=>{out+='<div class="timeline-row"><div class="time">'+esc(x.utcTimeLabel)+' · '+esc(x.localTimeLabel)+' local</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';});
     out+='</div>';
     if(stack){
       out+='<div class="section-title">STACKING PLAN</div><div class="stack-list">';
@@ -1817,7 +1863,7 @@
   };
   el.countrySearch.oninput=()=>populateCountries(el.countrySearch.value,el.playerCountry.value);
   el.playerCountry.onchange=()=>populateZones(el.playerCountry.value,null,true);
-  el.playerTimeZone.onchange=setDefaultWindow;
+  el.playerTimeZone.onchange=updateBattleWindowDisplay;
   el.playerRole.onchange=()=>el.starsField.classList.toggle("hidden",el.playerRole.value==="PVZ");
   fillTimeSelect(el.playStart,false);fillTimeSelect(el.playEnd,true);renderAll();
 })();
