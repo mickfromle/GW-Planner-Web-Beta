@@ -914,7 +914,7 @@
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const players=new Map(state.players.map(p=>[p.id,p])),loads=new Map(E.createAttackLoads(state.players,dp,w,dayId).map(x=>[x.playerId,x])),timeline=E.createTimeline(state.players,w,dayId),stack=E.createStackPlan(state.players,w,dayId);
     let out='<div class="section-title">TIMELINE</div><div class="timeline-list">';
-    timeline.forEach(x=>{out+='<div class="timeline-row"><div class="time">'+esc(x.utcTimeLabel)+' · '+esc(x.localTimeLabel)+' local</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';});
+    timeline.forEach(x=>{out+='<div class="timeline-row"><div class="time">'+esc(x.viewerTimeLabel)+' your time · '+esc(x.localTimeLabel)+' player local</div><div><strong>'+esc((players.get(x.playerId)||{}).name||x.playerId)+'</strong> · '+esc(phaseLabel(x.phase))+'</div></div>';});
     out+='</div>';
     if(stack){
       out+='<div class="section-title">STACKING PLAN</div><div class="stack-list">';
