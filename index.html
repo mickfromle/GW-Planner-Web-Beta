@@ -9,7 +9,7 @@
   <meta name="robots" content="noindex,nofollow">
   <title>GW Tactics – Planner Web Beta</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="./styles.css?v=20260922-2205">
+  <link rel="stylesheet" href="./styles.css?v=20260922-2230">
 </head>
 <body>
   <div id="jsErrorPanel" style="display:none;position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:#2b0d11;color:#fff;border:1px solid #ff5364;border-radius:10px;padding:12px;font:13px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;white-space:pre-wrap"></div>
@@ -214,15 +214,25 @@
         </label>
       </div>
 
-      <div class="two-col">
-        <label class="field">
-          <span>LOCAL PLAY FROM</span>
-          <select id="playStart"></select>
-        </label>
-        <label class="field">
-          <span>LOCAL PLAY UNTIL</span>
-          <select id="playEnd"></select>
-        </label>
+      <div class="field">
+        <span>GW BATTLE WINDOW</span>
+        <small class="muted compact">Full 22-hour Guild Wars window in the player's local time. This is information only.</small>
+        <div id="battleWindowValue" class="readonly-value"></div>
+      </div>
+
+      <div class="field">
+        <span>AVAILABLE PLAY TIME</span>
+        <small class="muted compact">Choose when this player can actually play in their local time. Timeline and Double / Stack planning use only this window.</small>
+        <div class="two-col">
+          <label class="field nested-field">
+            <span>FROM</span>
+            <select id="playStart"></select>
+          </label>
+          <label class="field nested-field">
+            <span>UNTIL</span>
+            <select id="playEnd"></select>
+          </label>
+        </div>
       </div>
 
       <div class="field">
@@ -287,8 +297,8 @@
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="./data.js?v=20260922-2205"></script>
-  <script src="./planner-engine.js?v=20260922-2205"></script>
-  <script src="./app.js?v=20260922-2205"></script>
+  <script src="./data.js?v=20260922-2230"></script>
+  <script src="./planner-engine.js?v=20260922-2230"></script>
+  <script src="./app.js?v=20260922-2230"></script>
 </body>
 </html>
