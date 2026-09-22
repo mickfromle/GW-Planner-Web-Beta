@@ -881,6 +881,30 @@ select[size] { min-height: 180px; }
 .review-message strong {
   color: #fff;
 }
+.review-info-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(110px,1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.review-info-btn {
+  min-height: 42px;
+  border: 1px solid #5a343b;
+  background: #201216;
+  color: #ff5160;
+  border-radius: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.review-info-btn.warning {
+  color: #f5bb4f;
+  border-color: #665127;
+  background: #211b0f;
+}
+.review-info-btn:active {
+  transform: translateY(1px);
+}
+
 .modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .grow { flex: 1 1 auto; }
 #linkedAccountsList {
