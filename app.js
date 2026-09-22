@@ -7,7 +7,7 @@
     weekTabs:byId("weekTabs"), weekStart:byId("weekStart"), teamSizeGrid:byId("teamSizeGrid"),
     saveSetupBtn:byId("saveSetupBtn"), playerCount:byId("playerCount"), playerList:byId("playerList"),
     addPlayerBtn:byId("addPlayerBtn"), playerDataBtn:byId("playerDataBtn"), autoPlanBtn:byId("autoPlanBtn"), planSection:byId("planSection"),
-    planTitle:byId("planTitle"), previewWeekTabs:byId("previewWeekTabs"), dayTabs:byId("dayTabs"), viewTabs:byId("viewTabs"),
+    planTitle:byId("planTitle"), dayTabs:byId("dayTabs"), viewTabs:byId("viewTabs"),
     planPreview:byId("planPreview"), exportBtn:byId("exportBtn"), playerDialog:byId("playerDialog"),
     playerForm:byId("playerForm"), playerDialogTitle:byId("playerDialogTitle"), playerId:byId("playerId"),
     playerName:byId("playerName"), playerShortCode:byId("playerShortCode"), playerColor:byId("playerColor"), playerColorPalette:byId("playerColorPalette"), countrySearch:byId("countrySearch"), playerCountry:byId("playerCountry"),
@@ -193,17 +193,19 @@
       });
     });
   }
+  reconcileGeneratedPlans();
   state.selectedWeek = Math.max(1, Math.min(4, state.selectedWeek || 1));
   let selectedDay = D.DAYS[0].id;
   let selectedView = "MAP";
   let shortCodeTouched = false;
   let toastTimer = null;
   let reviewAction = null;
+  let lastPreviewTapAt = 0;
+  let suppressPreviewDblClickUntil = 0;
 
   function showReview({
     title,
     message,
-    html=false,
     confirmLabel="OK",
     cancelLabel="CANCEL",
     showCancel=true,
@@ -211,8 +213,7 @@
   }) {
     reviewAction=onConfirm;
     el.reviewDialogTitle.textContent=title;
-    if(html) el.reviewDialogMessage.innerHTML=message;
-    else el.reviewDialogMessage.textContent=message;
+    el.reviewDialogMessage.textContent=message;
     el.reviewConfirmBtn.textContent=confirmLabel;
     el.reviewCancelBtn.textContent=cancelLabel;
     el.reviewCancelBtn.classList.toggle("hidden",!showCancel);
@@ -225,6 +226,39 @@
   }
 
   function saveState() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+  function invalidateGeneratedPlans() {
+    Object.values(state.weeks || {}).forEach(w=>{
+      D.DAYS.forEach(day=>{
+        const dp=w.days?.[day.id];
+        if(!dp)return;
+        dp.playerIds=[];
+        dp.pvpCorePlayerIds=[];
+      });
+    });
+  }
+
+  function reconcileGeneratedPlans() {
+    const validIds=new Set(state.players.map(p=>p.id));
+    Object.values(state.weeks || {}).forEach(w=>{
+      const stale=D.DAYS.some(day=>{
+        const dp=w.days?.[day.id];
+        if(!dp)return false;
+        return (dp.playerIds||[]).some(id=>!validIds.has(id)) ||
+          (dp.pvpCorePlayerIds||[]).some(id=>!validIds.has(id));
+      });
+      D.DAYS.forEach(day=>{
+        const dp=w.days?.[day.id];
+        if(!dp)return;
+        if(stale){
+          dp.playerIds=[];
+          dp.pvpCorePlayerIds=[];
+        }
+        dp.unavailablePlayerIds=(dp.unavailablePlayerIds||[])
+          .filter(id=>validIds.has(id));
+      });
+    });
+  }
   function ensureWeek(n) {
     const key = String(n);
     if (state.weeks[key]) return state.weeks[key];
@@ -607,6 +641,25 @@
       accountType:selfDetachedFromMain?"MAIN":(existing?.accountType||"MAIN"),
       mainAccountId:selfDetachedFromMain?null:(existing?.mainAccountId||null),
       linkedAccountIds};
+
+    const sameLinks=(a,b)=>{
+      const left=[...(a||[])].sort();
+      const right=[...(b||[])].sort();
+      return left.length===right.length&&left.every((value,index)=>value===right[index]);
+    };
+    const planningChanged=!existing ||
+      existing.countryCode!==p.countryCode ||
+      existing.timeZoneId!==p.timeZoneId ||
+      existing.role!==p.role ||
+      existing.pvpStars!==p.pvpStars ||
+      existing.preferredStartMinutes!==p.preferredStartMinutes ||
+      existing.preferredEndMinutes!==p.preferredEndMinutes ||
+      existing.doubleAttackPreference!==p.doubleAttackPreference ||
+      existing.accountType!==p.accountType ||
+      (existing.mainAccountId||null)!==(p.mainAccountId||null) ||
+      !sameLinks(existing.linkedAccountIds,p.linkedAccountIds) ||
+      detachedLocations.size>0;
+
     const i=state.players.findIndex(x=>x.id===id); if (i>=0) state.players[i]=p; else state.players.push(p);
     applyLinkedAccountGroup(id,linkedAccountIds,previousLinkedIds);
 
@@ -620,6 +673,7 @@
       detached.linkedAccountIds=[];
     });
 
+    if(planningChanged)invalidateGeneratedPlans();
     saveState(); closePlayer(); renderPlayers(); renderPlan(); toast("Player saved.");
   }
   function deletePlayer() {
@@ -629,8 +683,10 @@
       .filter(x=>x.id!==id)
       .map(x=>({...x,linkedAccountIds:(x.linkedAccountIds||[]).filter(linkedId=>linkedId!==id)}));
     Object.values(state.weeks).forEach(w=>D.DAYS.forEach(day=>{
-      const dp=w.days[day.id]; dp.playerIds=dp.playerIds.filter(x=>x!==id); dp.pvpCorePlayerIds=dp.pvpCorePlayerIds.filter(x=>x!==id); dp.unavailablePlayerIds=dp.unavailablePlayerIds.filter(x=>x!==id);
+      const dp=w.days[day.id];
+      dp.unavailablePlayerIds=(dp.unavailablePlayerIds||[]).filter(x=>x!==id);
     }));
+    invalidateGeneratedPlans();
     saveState(); closePlayer(); renderAll(); toast("Player deleted.");
   }
 
@@ -647,7 +703,22 @@
   }
   function createPlan() {
     saveSetup(false);
-    if (!state.players.length) return toast("Add players first.");
+    if (!state.players.length) {
+      invalidateGeneratedPlans();
+      saveState();
+      renderPlan();
+      showReview({
+        title:"NO PLAYERS",
+        message:"Add players before generating a Guild War plan.",
+        confirmLabel:"MANAGE PLAYERS",
+        showCancel:false,
+        onConfirm:()=>{
+          closeReview();
+          if(!el.playerDataDialog.open)el.playerDataDialog.showModal();
+        },
+      });
+      return;
+    }
 
     const weekNumber=state.selectedWeek;
     const current=week();
@@ -723,10 +794,7 @@
   function mapView(w,dayId) {
     const dp=w.days[dayId]; if(dp.teamSize===0)return '<div class="section-title">BREAK</div>';
     const load=D.MISSION_LOADS[dp.teamSize],islands=E.createIslandAssignments(state.players,w,dayId),colors=colorMap(w,dayId),players=new Map(state.players.map(p=>[p.id,p])),stack=E.createStackPlan(state.players,w,dayId);
-    const attackLoads=E.createAttackLoads(state.players,dp,w,dayId);
-    const actualPvp=attackLoads.reduce((sum,x)=>sum+(x.pvpAttacks||0),0);
-    const actualPvz=attackLoads.reduce((sum,x)=>sum+(x.pvzAttacks||0)+(x.spareAttacks||0),0);
-    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+actualPvp+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+actualPvz+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+load.spareAttacks+'</strong><span>STACK ATTACKS</span></div></div>';
+    let out='<div class="metrics"><div class="metric"><strong>'+dp.playerIds.length+'/'+dp.teamSize+'</strong><span>PLAYERS</span></div><div class="metric"><strong>'+load.pvpAttacks+'</strong><span>PVP ATTACKS</span></div><div class="metric"><strong>'+load.pvzAttacks+'</strong><span>PVZ ATTACKS</span></div><div class="metric"><strong>'+load.spareAttacks+'</strong><span>STACK ATTACKS</span></div></div>';
     out+='<div class="sector-plan"><div><span>SECTOR PLAN</span><strong>'+esc(load.maxSectorPlan)+'</strong></div><div class="sector-score">MAX VP '+load.maxVp+' <b>·</b> SECTOR SCORE '+load.maxSectorScore+'</div></div><div class="section-title section-title-line"><span>ISLAND ASSIGNMENTS</span></div>';
     const islandNumbers=[...new Set(islands.map(island=>Number(String(island.island).slice(0,-1))))].sort((a,b)=>a-b);
     out+='<div class="island-grid" style="--island-groups:'+Math.max(1,islandNumbers.length)+'">';
@@ -780,7 +848,7 @@
         .map(x=>x.targetSector+" "+x.targetMissionLevel+" x"+x.spareAttacks)
         .join(" / ")||"—";
       const color=colors.get(id)||"#373e42",code=p?playerCode(p):id.slice(0,3).toUpperCase();
-      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?(l.pvzAttacks||0)+(l.spareAttacks||0):0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
+      out+='<tr><td><div class="player-cell"><span class="player-code" style="background:'+color+';color:'+contrast(color)+'">'+esc(code)+'</span><strong>'+esc(p?p.name:id)+'</strong></div></td><td class="num"><span class="vp-chip">'+(vp.get(id)||0)+'</span></td><td><span class="role-chip role-'+esc(p?p.role:"PVZ")+'">'+esc(roleLabel(p?p.role:"PVZ"))+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvpAttacks:0)+'</span></td><td class="num"><span class="stat-chip">'+(l?l.pvzAttacks:0)+'</span></td><td><span class="stack-chip '+(stacks==="—"?"empty":"active")+'">'+esc(stacks)+'</span></td></tr>';
     });
     return out+'</tbody></table></div></div>';
   }
@@ -809,14 +877,116 @@
     }
     return out;
   }
+  function registrationSheet(w,capture) {
+    const players=new Map(state.players.map(p=>[p.id,p]));
+    const end=E.addDaysIso(w.weekStart,5);
+    let out='<div class="plan-sheet registration-sheet '+(capture?"capture":"")+'">';
+    out+='<div class="sheet-header registration-header">'+
+      '<div class="sheet-brand">GW TACTICS<small>GUILD WAR PLANNER</small></div>'+
+      '<div class="sheet-day">REGISTRATION</div>'+
+      '<div class="sheet-week"><strong>WEEK '+w.week+'</strong><span>'+esc(w.weekStart)+' – '+esc(end)+'</span></div>'+
+      '</div>';
+    out+='<div class="registration-title"><strong>REGISTRATION OVERVIEW</strong><span>WHO NEEDS TO REGISTER ON WHICH DAY</span></div>';
+    out+='<div class="registration-grid">';
+    D.DAYS.forEach((day,index)=>{
+      const dp=w.days[day.id];
+      const active=!!dp && dp.teamSize>0 && dp.playerIds.length>0;
+      out+='<div class="registration-day '+(active?"":"unavailable")+'">';
+      out+='<div class="registration-day-head"><strong>'+esc(day.label.toUpperCase())+'</strong>'+
+        '<span>'+(active?esc(dp.teamSize+"v"+dp.teamSize+" · "+dp.playerIds.length+" PLAYERS"):"BREAK / NO PLAN")+'</span>'+
+        '<small>'+esc(E.addDaysIso(w.weekStart,index).slice(5))+'</small></div>';
+      if(active){
+        out+='<div class="registration-player-list">';
+        dp.playerIds.forEach(id=>{
+          const p=players.get(id);
+          const name=p?.name||id;
+          out+='<div class="registration-player"><strong>'+esc(name)+'</strong></div>';
+        });
+        out+='</div>';
+      }
+      out+='</div>';
+    });
+    return out+'</div></div>';
+  }
+
   function sheet(w,dayId,view,capture) {
     const body=view==="MAP"?mapView(w,dayId):timelineView(w,dayId);
     return '<div class="plan-sheet '+(capture?"capture":"")+'">'+sheetHeader(w,dayId)+body+'</div>';
   }
 
+  function togglePreviewZoom(clientX,clientY) {
+    const wrap=el.planPreview;
+    const sheetEl=wrap.querySelector(".plan-sheet");
+    if(!sheetEl)return;
+
+    const zoomed=wrap.classList.contains("preview-zoomed");
+    if(zoomed){
+      wrap.classList.remove("preview-zoomed");
+      wrap.style.removeProperty("--preview-zoom-x");
+      wrap.style.removeProperty("--preview-zoom-y");
+      requestAnimationFrame(()=>{
+        wrap.scrollTo({left:0,top:0,behavior:"smooth"});
+      });
+      return;
+    }
+
+    const rect=sheetEl.getBoundingClientRect();
+    const x=Math.max(0,Math.min(rect.width,clientX-rect.left));
+    const y=Math.max(0,Math.min(rect.height,clientY-rect.top));
+    const xp=rect.width ? (x/rect.width)*100 : 50;
+    const yp=rect.height ? (y/rect.height)*100 : 50;
+    wrap.style.setProperty("--preview-zoom-x",xp+"%");
+    wrap.style.setProperty("--preview-zoom-y",yp+"%");
+    wrap.classList.add("preview-zoomed");
+  }
+
+  function installPreviewZoom() {
+    const wrap=el.planPreview;
+    wrap.ondblclick=event=>{
+      if(Date.now()<suppressPreviewDblClickUntil)return;
+      event.preventDefault();
+      togglePreviewZoom(event.clientX,event.clientY);
+    };
+    wrap.ontouchend=event=>{
+      if(event.changedTouches.length!==1)return;
+      const now=Date.now();
+      const touch=event.changedTouches[0];
+      if(now-lastPreviewTapAt<320){
+        event.preventDefault();
+        suppressPreviewDblClickUntil=now+450;
+        togglePreviewZoom(touch.clientX,touch.clientY);
+        lastPreviewTapAt=0;
+      }else{
+        lastPreviewTapAt=now;
+      }
+    };
+  }
+
   function renderPlan() {
     const w=week(),hasAssignments=D.DAYS.some(d=>w.days[d.id].playerIds.length>0),valid=hasAssignments&&E.isPlanValid(state.players,w);
     el.autoPlanBtn.textContent=hasAssignments?"REPLAN WEEK "+w.week:"AUTO PLAN WEEK "+w.week;
+
+    if(!state.players.length){
+      el.planSection.classList.remove("hidden");
+      el.exportBtn.disabled=true;
+      el.planTitle.textContent="Plan preview";
+      el.dayTabs.innerHTML="";
+      el.viewTabs.innerHTML="";
+      el.planPreview.classList.remove("preview-zoomed");
+      el.planPreview.innerHTML=
+        '<div class="empty-week-state">'+
+        '<div class="empty-week-hint">Add players to generate this week.</div>'+
+        D.DAYS.map(day=>{
+          const dp=w.days[day.id];
+          const label=dp.teamSize===0?"BREAK":dp.teamSize+"v"+dp.teamSize;
+          const detail=dp.teamSize===0?"":"<small>No plan generated.</small>";
+          return '<div class="empty-day-card"><strong>'+esc(day.label.toUpperCase())+'</strong><span>'+esc(label)+'</span>'+detail+'</div>';
+        }).join("")+
+        '</div>';
+      return;
+    }
+
+    el.exportBtn.disabled=!valid;
     el.planSection.classList.toggle("hidden",!valid); if(!valid)return;
     const availableDays=D.DAYS.filter(d=>{
       const dp=w.days[d.id];
@@ -825,21 +995,7 @@
     if(!w.days[selectedDay] || !availableDays.some(d=>d.id===selectedDay)){
       selectedDay=(availableDays[0]||D.DAYS[0]).id;
     }
-    el.planTitle.textContent="Week "+w.week+" preview";
-    el.previewWeekTabs.innerHTML="";
-    for(let n=1;n<=4;n++){
-      const b=document.createElement("button");
-      b.type="button";
-      b.className="tab"+(n===state.selectedWeek?" active":"");
-      b.textContent="WEEK "+n;
-      b.onclick=()=>{
-        state.selectedWeek=n;
-        ensureWeek(n);
-        saveState();
-        renderAll();
-      };
-      el.previewWeekTabs.appendChild(b);
-    }
+    el.planTitle.textContent="Plan preview";
     el.dayTabs.innerHTML="";
     D.DAYS.forEach(d=>{
       const dp=w.days[d.id];
@@ -854,7 +1010,9 @@
     });
     el.viewTabs.innerHTML="";
     ["MAP","TIMELINE"].forEach(v=>{const b=document.createElement("button");b.type="button";b.className="tab"+(v===selectedView?" active":"");b.textContent=v;b.onclick=()=>{selectedView=v;renderPlan();};el.viewTabs.appendChild(b);});
+    el.planPreview.classList.remove("preview-zoomed");
     el.planPreview.innerHTML=sheet(w,selectedDay,selectedView,false);
+    installPreviewZoom();
   }
 
   function openExport() {
@@ -862,6 +1020,7 @@
     el.exportRange.innerHTML="";
     D.DAYS.forEach(d=>{const o=document.createElement("option");o.value=d.id;o.textContent=d.label;o.selected=d.id===selectedDay;el.exportRange.appendChild(o);});
     const all=document.createElement("option");all.value="WEEK";all.textContent="Whole week";el.exportRange.appendChild(all);
+    const registration=document.createElement("option");registration.value="REGISTRATION";registration.textContent="Registration overview";el.exportRange.appendChild(registration);
     el.exportStatus.textContent="";el.exportDialog.showModal();
   }
   function canvasBlob(canvas){return new Promise(resolve=>canvas.toBlob(resolve,"image/png",1));}
@@ -873,13 +1032,24 @@
     const day=(D.DAYS.find(d=>d.id===dayId)||{}).label||dayId;
     return new File([blob],"GW_Tactics_Week_"+w.week+"_"+day+"_"+view+".png",{type:"image/png"});
   }
+  async function captureRegistrationFile(w) {
+    el.captureRoot.innerHTML=registrationSheet(w,true);
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const canvas=await html2canvas(el.captureRoot.firstElementChild,{scale:2,backgroundColor:"#080a0c",useCORS:true,logging:false,width:1440,windowWidth:1440});
+    const blob=await canvasBlob(canvas);el.captureRoot.innerHTML="";
+    return new File([blob],"GW_Tactics_Week_"+w.week+"_Registration_Overview.png",{type:"image/png"});
+  }
   async function exportSelected(event) {
     event.preventDefault();
     const views=[...el.exportForm.querySelectorAll('input[name="exportView"]:checked')].map(x=>x.value);
-    if(!views.length){el.exportStatus.textContent="Select at least one screenshot.";return;}
-    const w=week(),range=el.exportRange.value,days=range==="WEEK"?D.DAYS.map(d=>d.id):[range],total=days.length*views.length,files=[];
+    const w=week(),range=el.exportRange.value;
+    if(range!=="REGISTRATION"&&!views.length){el.exportStatus.textContent="Select at least one screenshot.";return;}
+    const days=range==="WEEK"?D.DAYS.filter(d=>w.days[d.id]&&w.days[d.id].teamSize>0&&w.days[d.id].playerIds.length>0).map(d=>d.id):range==="REGISTRATION"?[]:[range];
+    const includeRegistration=range==="WEEK"||range==="REGISTRATION";
+    const total=days.length*views.length+(includeRegistration?1:0),files=[];
     try{
       for(const d of days)for(const v of views){el.exportStatus.textContent="Creating screenshot "+(files.length+1)+" of "+total+"…";files.push(await captureFile(w,d,v));}
+      if(includeRegistration){el.exportStatus.textContent="Creating screenshot "+(files.length+1)+" of "+total+"…";files.push(await captureRegistrationFile(w));}
       el.exportStatus.textContent="Ready.";
       if(navigator.canShare&&navigator.canShare({files})&&navigator.share)await navigator.share({title:"GW Tactics · Week "+w.week,text:"GW Planner",files});
       else for(const file of files){const url=URL.createObjectURL(file),a=document.createElement("a");a.href=url;a.download=file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);await new Promise(r=>setTimeout(r,120));}
@@ -910,64 +1080,146 @@
     }
 
     const headers=[
-      "Account Name","Country","Region / Time Zone","Role","PvP Strength",
-      "Local Play From","Local Play Until","Double Attacks",
-      "Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"
+      "Account Name",
+      "Country",
+      "Region / Time Zone",
+      "Role",
+      "PvP Strength",
+      "Available From (Local Time)",
+      "Available Until (Local Time)",
+      "Available for Double"
     ];
-    const countries=[...D.COUNTRIES]
-      .map(c=>c.name+" ["+c.code+"]")
-      .sort((a,b)=>a.localeCompare(b));
-    const zones=(window.moment?.tz?.names?.() || ["UTC"])
-      .slice()
-      .sort()
-      .map(id=>id.split("/").map(x=>x.replaceAll("_"," ")).join(" · ")+" ["+id+"]");
-    const roles=["PvP","PvZ","both"];
-    const strengths=["1","2","3","4","5"];
-    const doubleOptions=[
-      "Preferred for double attacks",
-      "Allowed for double attacks",
-      "Do not use for double attacks"
-    ];
+
+    const countryEntries=[...D.COUNTRIES]
+      .map(country=>({
+        code:country.code,
+        label:country.name+" ["+country.code+"]",
+        zones:D.timeZonesForCountry(country.code)
+          .map(zone=>zone.label+" ["+zone.id+"]")
+      }))
+      .sort((a,b)=>a.label.localeCompare(b.label));
+
+    const countries=countryEntries.map(x=>x.label);
+    const roles=["PvP","PvZ","Both"];
+    const strengths=[1,2,3,4,5].map(count=>"★".repeat(count)+"☆".repeat(5-count));
+    const doubleOptions=["Preferred","Yes","No"];
     const times=[];
-    for(let h=0;h<24;h++){
-      times.push(String(h).padStart(2,"0")+":00");
-      times.push(String(h).padStart(2,"0")+":30");
+    for(let minutes=0;minutes<24*60;minutes+=15){
+      times.push(
+        String(Math.floor(minutes/60)).padStart(2,"0")+":"+
+        String(minutes%60).padStart(2,"0")
+      );
     }
     times.push("24:00");
 
+    const currentWeek=week();
+    const referenceDate=E.dateForDay(currentWeek,D.DAYS[0].id);
+    const [year,month,day]=referenceDate.split("-").map(Number);
+    const startMinutes=currentWeek.battleStartUtcMinutes ?? E.BATTLE_START_UTC_MINUTES;
+    const battleStart=new Date(Date.UTC(
+      year,
+      month-1,
+      day,
+      Math.floor(startMinutes/60),
+      startMinutes%60
+    ));
+    const battleEnd=new Date(
+      battleStart.getTime()+E.BATTLE_DURATION_MINUTES*60000
+    );
+
+    const localTime=(instant,zoneId)=>{
+      try{
+        const parts=new Intl.DateTimeFormat("en-GB",{
+          timeZone:zoneId,
+          hour:"2-digit",
+          minute:"2-digit",
+          hourCycle:"h23"
+        }).formatToParts(instant);
+        let hour=Number(parts.find(p=>p.type==="hour")?.value||0);
+        if(hour===24)hour=0;
+        const minute=Number(parts.find(p=>p.type==="minute")?.value||0);
+        return String(hour).padStart(2,"0")+":"+String(minute).padStart(2,"0");
+      }catch(_){
+        return "";
+      }
+    };
+
+    const timeDefaults=[];
+    const seenZoneOptions=new Set();
+    countryEntries.forEach(entry=>{
+      entry.zones.forEach(option=>{
+        if(seenZoneOptions.has(option))return;
+        seenZoneOptions.add(option);
+        const zoneId=timeZoneFromTemplate(option);
+        timeDefaults.push([
+          option,
+          localTime(battleStart,zoneId),
+          localTime(battleEnd,zoneId)
+        ]);
+      });
+    });
+    timeDefaults.sort((a,b)=>a[0].localeCompare(b[0]));
+
     const rows=[headers];
-    for(let i=0;i<100;i++) rows.push(Array(headers.length).fill(""));
+    for(let i=0;i<100;i++)rows.push(Array(headers.length).fill(""));
     const playerSheet=XLSX.utils.aoa_to_sheet(rows);
     playerSheet["!cols"]=[
-      {wch:24},{wch:28},{wch:30},{wch:14},{wch:14},{wch:18},{wch:18},{wch:29},
-      {wch:24},{wch:24},{wch:24},{wch:24}
+      {wch:24},{wch:28},{wch:30},{wch:15},
+      {wch:15},{wch:18},{wch:18},{wch:29}
     ];
+
+    const lookupEnd=timeDefaults.length+1;
+    for(let row=2;row<=101;row++){
+      playerSheet["F"+row]={
+        t:"s",
+        f:"IFERROR(VLOOKUP($C"+row+",'Lists'!$F$2:$H$"+lookupEnd+",2,FALSE),\"\")",
+        v:""
+      };
+      playerSheet["G"+row]={
+        t:"s",
+        f:"IFERROR(VLOOKUP($C"+row+",'Lists'!$F$2:$H$"+lookupEnd+",3,FALSE),\"\")",
+        v:""
+      };
+    }
 
     const instructionRows=[
       ["GW Tactics · Player Data Template"],
       ["How to fill it"],
       ["1. Account Name is the only free-text field."],
-      ["2. Use the dropdowns for Country, Time Zone, Role, PvP Strength, Play Time and Double Attacks."],
-      ["3. Linked Account dropdowns automatically use the Account Names entered in the Players sheet."],
-      ["4. If one real person controls several accounts, select the other account names in Linked Account 1–4."],
-      ["5. You do not need to enter the reverse link twice; GW Tactics builds the complete linked-account group during import."],
-      ["6. PvP Strength is ignored for PvZ-only accounts."],
-      ["7. Do not rename the Players sheet or its column headers."],
-      ["8. Save the workbook as .xlsx and import it into GW Tactics."]
+      ["2. Use the dropdowns for Country, Time Zone, Role, PvP Strength, availability and Available for Double."],
+      ["3. Enter availability in the player's own local time. Do not convert it to German time."],
+      ["4. PvP Strength is ignored for PvZ-only accounts."],
+      ["5. Linked accounts are managed inside GW Tactics and are not entered in this template."],
+      ["6. Do not rename the Players sheet or its column headers."],
+      ["7. Save the workbook as .xlsx and import it into GW Tactics."]
     ];
     const instructionSheet=XLSX.utils.aoa_to_sheet(instructionRows);
     instructionSheet["!cols"]=[{wch:100}];
 
-    const max=Math.max(countries.length,zones.length,roles.length,strengths.length,doubleOptions.length,times.length);
-    const listRows=[["Countries","Time Zones","Roles","PvP Strength","Double Attacks","Times"]];
-    for(let i=0;i<max;i++){
-      listRows.push([
-        countries[i]||"",zones[i]||"",roles[i]||"",strengths[i]||"",
-        doubleOptions[i]||"",times[i]||""
+    const columns=[
+      ["Countries",countries],
+      ["Roles",roles],
+      ["PvP Strength",strengths],
+      ["Available for Double",doubleOptions],
+      ["Times",times],
+      ["Time Zone Lookup",timeDefaults.map(x=>x[0])],
+      ["Available From",timeDefaults.map(x=>x[1])],
+      ["Available Until",timeDefaults.map(x=>x[2])]
+    ];
+
+    countryEntries.forEach(entry=>{
+      columns.push([
+        "TZ_"+entry.code.replaceAll("-","_"),
+        entry.zones
       ]);
+    });
+
+    const max=Math.max(...columns.map(column=>column[1].length));
+    const listRows=[columns.map(column=>column[0])];
+    for(let i=0;i<max;i++){
+      listRows.push(columns.map(column=>column[1][i]||""));
     }
     const listSheet=XLSX.utils.aoa_to_sheet(listRows);
-    listSheet["!cols"]=[{wch:34},{wch:34},{wch:18},{wch:18},{wch:30},{wch:16}];
 
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,playerSheet,"Players");
@@ -977,8 +1229,17 @@
     wb.Workbook.Sheets=[
       {Hidden:0},
       {Hidden:0},
-      {Hidden:1},
+      {Hidden:1}
     ];
+    wb.Workbook.Names=countryEntries.map((entry,index)=>{
+      const columnIndex=8+index;
+      const column=XLSX.utils.encode_col(columnIndex);
+      const lastRow=Math.max(2,entry.zones.length+1);
+      return {
+        Name:"TZ_"+entry.code.replaceAll("-","_"),
+        Ref:"Lists!$"+column+"$2:$"+column+"$"+lastRow
+      };
+    });
 
     const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
     const zip=await JSZip.loadAsync(bytes);
@@ -991,16 +1252,32 @@
 
     const validations=[
       validation("B2:B101","INDIRECT(\"'Lists'!$A$2:$A$"+(countries.length+1)+"\")"),
-      validation("C2:C101","INDIRECT(\"'Lists'!$B$2:$B$"+(zones.length+1)+"\")"),
-      validation("D2:D101","INDIRECT(\"'Lists'!$C$2:$C$"+(roles.length+1)+"\")"),
-      validation("E2:E101","INDIRECT(\"'Lists'!$D$2:$D$"+(strengths.length+1)+"\")"),
-      validation("F2:G101","INDIRECT(\"'Lists'!$F$2:$F$"+(times.length+1)+"\")"),
-      validation("H2:H101","INDIRECT(\"'Lists'!$E$2:$E$"+(doubleOptions.length+1)+"\")"),
-      validation("I2:L101","$A$2:$A$101")
+      validation(
+        "C2:C101",
+        "INDIRECT(\"TZ_\"&SUBSTITUTE(MID($B2,FIND(\"[\",$B2)+1,FIND(\"]\",$B2)-FIND(\"[\",$B2)-1),\"-\",\"_\"))"
+      ),
+      validation("D2:D101","INDIRECT(\"'Lists'!$B$2:$B$"+(roles.length+1)+"\")"),
+      validation("E2:E101","INDIRECT(\"'Lists'!$C$2:$C$"+(strengths.length+1)+"\")"),
+      validation("F2:G101","INDIRECT(\"'Lists'!$E$2:$E$"+(times.length+1)+"\")"),
+      validation("H2:H101","INDIRECT(\"'Lists'!$D$2:$D$"+(doubleOptions.length+1)+"\")")
     ].join("");
 
-    xml=xml.replace("</sheetData>",'</sheetData><dataValidations count="7">'+validations+'</dataValidations>');
+    xml=xml.replace(
+      "</sheetData>",
+      '</sheetData><dataValidations count="6">'+validations+'</dataValidations>'
+    );
     zip.file(sheetPath,xml);
+
+    const workbookPath="xl/workbook.xml";
+    let workbookXml=await zip.file(workbookPath).async("string");
+    if(!workbookXml.includes("<calcPr")){
+      workbookXml=workbookXml.replace(
+        "</workbook>",
+        '<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>'
+      );
+      zip.file(workbookPath,workbookXml);
+    }
+
     const blob=await zip.generateAsync({
       type:"blob",
       mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1042,9 +1319,17 @@
   function doubleFromTemplate(value) {
     const v=String(value||"").trim().toLowerCase();
     if(v.startsWith("preferred"))return "PREFERRED";
-    if(v.startsWith("allowed"))return "ALLOWED";
-    if(v.startsWith("do not use"))return "DO_NOT_USE";
+    if(v==="yes"||v.startsWith("allowed"))return "ALLOWED";
+    if(v==="no"||v.startsWith("do not use"))return "DO_NOT_USE";
     return null;
+  }
+
+  function starsFromTemplate(value) {
+    const text=String(value||"").trim();
+    const numeric=Number.parseInt(text,10);
+    if(Number.isFinite(numeric)&&numeric>=1&&numeric<=5)return numeric;
+    const stars=[...text].filter(char=>char==="★").length;
+    return stars>=1&&stars<=5?stars:null;
   }
 
   function zoneIsValid(zone) {
@@ -1054,8 +1339,27 @@
     } catch (_) { return false; }
   }
 
+  function workbookField(row,...names) {
+    for(const name of names){
+      if(Object.prototype.hasOwnProperty.call(row,name)){
+        const value=row[name];
+        if(value!==undefined&&value!==null&&String(value).trim()!=="")return value;
+      }
+    }
+    return "";
+  }
+
   function importWorkbookRows(rows) {
+    const backupHeaders=[
+      "Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4",
+      "Account Type","Main Account"
+    ];
+    const hasBackupData=rows.length>0&&backupHeaders.every(header=>
+      Object.prototype.hasOwnProperty.call(rows[0],header)
+    );
+
     const existingByName=new Map(state.players.map(p=>[p.name.trim().toLowerCase(),p]));
+    const existingById=new Map(state.players.map(p=>[p.id,p]));
     const parsed=[];
     const warnings=[];
     const seen=new Set();
@@ -1066,104 +1370,189 @@
       const name=String(row["Account Name"]||"").trim();
       if(!name)return;
       const key=name.toLowerCase();
-      if(seen.has(key)){warnings.push("Row "+rowNo+": duplicate account name "+name);return;}
+
+      if(seen.has(key)){
+        warnings.push("Row "+rowNo+": duplicate account name "+name);
+        return;
+      }
       seen.add(key);
 
       const countryCode=countryCodeFromTemplate(row["Country"]);
       const timeZoneId=timeZoneFromTemplate(row["Region / Time Zone"]);
       const role=roleFromTemplate(row["Role"]);
-      const stars=Number(row["PvP Strength"]);
-      const from=minutesFromTemplate(row["Local Play From"]);
-      const until=minutesFromTemplate(row["Local Play Until"]);
-      const doubleAttackPreference=doubleFromTemplate(row["Double Attacks"]);
+      const stars=starsFromTemplate(row["PvP Strength"]);
+      const from=minutesFromTemplate(
+        workbookField(row,"Available From (Local Time)","Local Play From")
+      );
+      const until=minutesFromTemplate(
+        workbookField(row,"Available Until (Local Time)","Local Play Until")
+      );
+      const doubleAttackPreference=doubleFromTemplate(
+        workbookField(row,"Available for Double","Double Attacks")
+      );
+
+      const linkedNames=hasBackupData
+        ? ["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
+            .map(header=>String(row[header]||"").trim())
+            .filter(value=>value&&value.toLowerCase()!==key)
+            .filter((value,i,array)=>array.findIndex(other=>other.toLowerCase()===value.toLowerCase())===i)
+        : [];
+
+      const backupAccountType=hasBackupData
+        ? String(row["Account Type"]||"").trim().toUpperCase()
+        : null;
+      const backupMainAccountName=hasBackupData
+        ? String(row["Main Account"]||"").trim()||null
+        : null;
+
       const bad=[];
       if(!countryCode)bad.push("Country");
       if(!timeZoneId||!zoneIsValid(timeZoneId))bad.push("Time Zone");
       if(!role)bad.push("Role");
-      if(role&&role!=="PVZ"&&(!Number.isFinite(stars)||stars<1||stars>5))bad.push("PvP Strength");
-      if(from===null)bad.push("Local Play From");
-      if(until===null)bad.push("Local Play Until");
-      if(!doubleAttackPreference)bad.push("Double Attacks");
-      if(bad.length){warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));return;}
+      if(role&&role!=="PVZ"&&stars===null)bad.push("PvP Strength");
+      if(from===null)bad.push("Available From (Local Time)");
+      if(until===null)bad.push("Available Until (Local Time)");
+      if(!doubleAttackPreference)bad.push("Available for Double");
+      if(hasBackupData&&!["MAIN","SECOND"].includes(backupAccountType))bad.push("Account Type");
+      if(hasBackupData&&backupAccountType==="SECOND"&&!backupMainAccountName)bad.push("Main Account");
+
+      if(bad.length){
+        warnings.push("Row "+rowNo+" ("+name+"): "+bad.join(", "));
+        return;
+      }
 
       const existing=existingByName.get(key)||null;
+      const pvpStars=role==="PVZ"?null:stars;
+
+      const currentLinkedNames=existing
+        ? (existing.linkedAccountIds||[])
+            .map(id=>existingById.get(id)?.name)
+            .filter(Boolean)
+            .map(value=>value.toLowerCase())
+            .sort()
+        : [];
+      const backupLinkedNames=[...linkedNames]
+        .map(value=>value.toLowerCase())
+        .sort();
+      const currentMainName=existing?.mainAccountId
+        ? existingById.get(existing.mainAccountId)?.name||null
+        : null;
+
+      const baseChanged=!!existing&&(
+        existing.name!==name ||
+        existing.countryCode!==countryCode ||
+        existing.timeZoneId!==timeZoneId ||
+        existing.role!==role ||
+        existing.pvpStars!==pvpStars ||
+        existing.preferredStartMinutes!==from ||
+        existing.preferredEndMinutes!==until ||
+        existing.doubleAttackPreference!==doubleAttackPreference
+      );
+
+      const backupChanged=!!existing&&hasBackupData&&(
+        currentLinkedNames.length!==backupLinkedNames.length ||
+        currentLinkedNames.some((value,i)=>value!==backupLinkedNames[i]) ||
+        existing.accountType!==backupAccountType ||
+        String(currentMainName||"").toLowerCase()!==String(backupMainAccountName||"").toLowerCase()
+      );
+
       parsed.push({
+        rowNo,
         id:existing?.id||(crypto.randomUUID?crypto.randomUUID():"p"+Date.now()+"_"+rowNo),
-        name,countryCode,timeZoneId,role,pvpStars:role==="PVZ"?null:stars,
-        preferredStartMinutes:from,preferredEndMinutes:until,doubleAttackPreference,
-        linkedNames:["Linked Account 1","Linked Account 2","Linked Account 3","Linked Account 4"]
-          .map(h=>String(row[h]||"").trim())
-          .filter(x=>x&&x.toLowerCase()!==key)
-          .filter((x,i,a)=>a.findIndex(y=>y.toLowerCase()===x.toLowerCase())===i),
-        existing
+        name,
+        countryCode,
+        timeZoneId,
+        role,
+        pvpStars,
+        preferredStartMinutes:from,
+        preferredEndMinutes:until,
+        doubleAttackPreference,
+        linkedNames,
+        backupAccountType,
+        backupMainAccountName,
+        existing,
+        status:!existing?"NEW":(baseChanged||backupChanged?"UPDATED":"UNCHANGED")
       });
     });
 
-    const knownNames=new Set([...state.players.map(p=>p.name.toLowerCase()),...parsed.map(p=>p.name.toLowerCase())]);
-    parsed.forEach(p=>p.linkedNames.forEach(name=>{
-      if(!knownNames.has(name.toLowerCase()))warnings.push("Linked account '"+name+"' for "+p.name+" was not found.");
-    }));
+    if(hasBackupData){
+      const knownByName=new Map();
+      state.players.forEach(player=>knownByName.set(player.name.toLowerCase(),player.countryCode));
+      parsed.forEach(row=>knownByName.set(row.name.toLowerCase(),row.countryCode));
+
+      parsed.forEach(row=>{
+        row.linkedNames.forEach(name=>{
+          const linkedCountry=knownByName.get(name.toLowerCase());
+          if(!linkedCountry){
+            warnings.push("Row "+row.rowNo+" ("+row.name+"): linked account '"+name+"' was not found.");
+          }else if(linkedCountry!==row.countryCode){
+            warnings.push("Row "+row.rowNo+" ("+row.name+"): linked account '"+name+"' has a different country.");
+          }
+        });
+        if(row.backupMainAccountName&&!knownByName.has(row.backupMainAccountName.toLowerCase())){
+          warnings.push("Row "+row.rowNo+" ("+row.name+"): main account '"+row.backupMainAccountName+"' was not found.");
+        }
+      });
+    }
 
     return {
-      parsed,warnings,
-      newCount:parsed.filter(p=>!p.existing).length,
-      updateCount:parsed.filter(p=>!!p.existing).length,
+      parsed,
+      warnings,
+      hasBackupData,
+      newCount:parsed.filter(row=>row.status==="NEW").length,
+      updateCount:parsed.filter(row=>row.status==="UPDATED").length,
+      unchangedCount:parsed.filter(row=>row.status==="UNCHANGED").length,
       skippedCount:Math.max(0,filledCount-parsed.length)
     };
   }
 
   function applyWorkbookImport(plan) {
-    const importedIds=new Set(plan.parsed.map(p=>p.id));
+    const changedRows=plan.parsed.filter(row=>row.status!=="UNCHANGED");
 
-    plan.parsed.forEach(row=>{
+    changedRows.forEach(row=>{
       const current=row.existing;
       const player={
-        id:row.id,name:row.name,
+        id:row.id,
+        name:row.name,
         shortCode:current?playerCode(current):suggestShortCode(row.name,row.id),
         colorHex:current?playerColor(current):suggestPlayerColor(row.id),
-        countryCode:row.countryCode,timeZoneId:row.timeZoneId,role:row.role,pvpStars:row.pvpStars,
-        preferredStartMinutes:row.preferredStartMinutes,preferredEndMinutes:row.preferredEndMinutes,
+        countryCode:row.countryCode,
+        timeZoneId:row.timeZoneId,
+        role:row.role,
+        pvpStars:row.pvpStars,
+        preferredStartMinutes:row.preferredStartMinutes,
+        preferredEndMinutes:row.preferredEndMinutes,
         preferredSpare:row.doubleAttackPreference==="PREFERRED",
-        doubleAttackPreference:row.doubleAttackPreference,linkedAccountIds:[]
+        doubleAttackPreference:row.doubleAttackPreference,
+        accountType:current?.accountType||"MAIN",
+        mainAccountId:current?.mainAccountId||null,
+        linkedAccountIds:[...(current?.linkedAccountIds||[])]
       };
-      const i=state.players.findIndex(p=>p.id===row.id);
-      if(i>=0)state.players[i]=player;else state.players.push(player);
+      const index=state.players.findIndex(p=>p.id===row.id);
+      if(index>=0)state.players[index]=player;
+      else state.players.push(player);
     });
 
-    state.players.forEach(p=>{
-      if(importedIds.has(p.id))p.linkedAccountIds=[];
-      else p.linkedAccountIds=(p.linkedAccountIds||[]).filter(id=>!importedIds.has(id));
-    });
+    if(plan.hasBackupData){
+      const byName=new Map(state.players.map(player=>[player.name.toLowerCase(),player]));
+      plan.parsed.forEach(row=>{
+        const current=byName.get(row.name.toLowerCase());
+        if(!current)return;
 
-    const byName=new Map(state.players.map(p=>[p.name.toLowerCase(),p.id]));
-    const byId=new Map(state.players.map(p=>[p.id,p]));
-    const adjacency=new Map(state.players.map(p=>[p.id,new Set()]));
-    plan.parsed.forEach(row=>{
-      row.linkedNames.forEach(name=>{
-        const id=byName.get(name.toLowerCase());
-        if(!id||id===row.id)return;
-        adjacency.get(row.id).add(id);
-        adjacency.get(id).add(row.id);
+        current.linkedAccountIds=row.linkedNames
+          .map(name=>byName.get(name.toLowerCase())?.id)
+          .filter(id=>id&&id!==current.id);
+        current.accountType=row.backupAccountType||"MAIN";
+        current.mainAccountId=current.accountType==="SECOND"&&row.backupMainAccountName
+          ? byName.get(row.backupMainAccountName.toLowerCase())?.id||null
+          : null;
       });
-    });
+    }
 
-    const visited=new Set();
-    importedIds.forEach(root=>{
-      if(visited.has(root))return;
-      const group=new Set([root]),queue=[root];visited.add(root);
-      while(queue.length){
-        const cur=queue.shift();
-        (adjacency.get(cur)||[]).forEach(next=>{
-          if(!group.has(next)){group.add(next);visited.add(next);queue.push(next);}
-        });
-      }
-      group.forEach(id=>{
-        const p=byId.get(id);
-        if(p)p.linkedAccountIds=[...group].filter(x=>x!==id);
-      });
-    });
-
-    saveState();renderPlayers();renderPlan();
+    if(changedRows.length)invalidateGeneratedPlans();
+    saveState();
+    renderPlayers();
+    renderPlan();
   }
 
   async function handlePlayerWorkbook(file) {
@@ -1174,6 +1563,7 @@
       if(!sheet)throw new Error("Players sheet missing");
       const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:false});
       const plan=importWorkbookRows(rows);
+
       if(!plan.parsed.length){
         const details=plan.warnings.length
           ? "\n\n"+plan.warnings.slice(0,8).map(x=>"• "+x).join("\n")
@@ -1186,59 +1576,71 @@
         });
         return;
       }
-      const newNames=plan.parsed.filter(p=>!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
-      const updateNames=plan.parsed.filter(p=>!!p.existing).map(p=>p.name).sort((a,b)=>a.localeCompare(b));
-      const links=plan.parsed
-        .filter(p=>p.linkedNames.length)
-        .map(p=>p.name+" → "+p.linkedNames.join(", "));
 
-      const listHtml=(items,limit,icon="•")=>{
-        if(!items.length)return "";
-        const shown=items.slice(0,limit).map(x=>"<li><span>"+icon+"</span>"+esc(x)+"</li>").join("");
-        const more=items.length>limit
-          ? "<li class=\"review-more\"><span>+</span>"+(items.length-limit)+" more</li>"
-          : "";
-        return "<ul class=\"review-list\">"+shown+more+"</ul>";
-      };
-      const message=
-        "<div class=\"import-summary-grid\">"+
-          "<div class=\"import-stat good\"><strong>"+plan.newCount+"</strong><span>NEW</span></div>"+
-          "<div class=\"import-stat info\"><strong>"+plan.updateCount+"</strong><span>UPDATES</span></div>"+
-          "<div class=\"import-stat "+(plan.warnings.length?"warn":"quiet")+"\"><strong>"+plan.warnings.length+"</strong><span>WARNINGS</span></div>"+
-        "</div>"+
-        (newNames.length
-          ? "<section class=\"review-section\"><h3>NEW PLAYERS</h3>"+listHtml(newNames,10,"＋")+"</section>"
-          : "")+
-        (updateNames.length
-          ? "<section class=\"review-section\"><h3>UPDATES</h3>"+listHtml(updateNames,10,"↻")+"</section>"
-          : "")+
-        (links.length
-          ? "<section class=\"review-section linked\"><h3>LINKED ACCOUNTS</h3>"+listHtml(links,8,"↔")+"</section>"
-          : "")+
-        (plan.warnings.length
-          ? "<section class=\"review-section warnings\"><h3>WARNINGS</h3>"+listHtml(plan.warnings,6,"!")+"</section>"
-          : "")+
-        "<div class=\"review-question\">Import the valid rows now?</div>";
+      const newNames=plan.parsed
+        .filter(row=>row.status==="NEW")
+        .map(row=>row.name)
+        .sort((a,b)=>a.localeCompare(b));
+      const updateNames=plan.parsed
+        .filter(row=>row.status==="UPDATED")
+        .map(row=>row.name)
+        .sort((a,b)=>a.localeCompare(b));
+
+      let message=
+        plan.newCount+" new · "+
+        plan.updateCount+" updates · "+
+        plan.unchangedCount+" unchanged · "+
+        plan.warnings.length+" warnings";
+
+      if(newNames.length){
+        message+="\n\nNEW\n"+
+          newNames.slice(0,10).map(x=>"• "+x).join("\n")+
+          (newNames.length>10?"\n… +"+(newNames.length-10):"");
+      }
+      if(updateNames.length){
+        message+="\n\nUPDATE\n"+
+          updateNames.slice(0,10).map(x=>"• "+x).join("\n")+
+          (updateNames.length>10?"\n… +"+(updateNames.length-10):"");
+      }
+      if(plan.warnings.length){
+        message+="\n\nWARNINGS\n"+
+          plan.warnings.slice(0,6).map(x=>"• "+x).join("\n")+
+          (plan.warnings.length>6?"\n… +"+(plan.warnings.length-6):"");
+      }
+      message+="\n\nImport the valid player rows now?";
 
       showReview({
-        title:"IMPORT PLAYERS",
+        title:plan.hasBackupData?"RESTORE BACKUP":"IMPORT PLAYERS",
         message,
-        html:true,
-        confirmLabel:"IMPORT PLAYERS",
+        confirmLabel:plan.hasBackupData?"RESTORE BACKUP":"IMPORT PLAYERS",
         onConfirm:()=>{
           applyWorkbookImport(plan);
           if(el.playerDataDialog.open)el.playerDataDialog.close();
 
-          const names=plan.parsed
-            .map(p=>p.name)
+          const changedNames=plan.parsed
+            .filter(row=>row.status!=="UNCHANGED")
+            .map(row=>row.name)
             .sort((a,b)=>a.localeCompare(b));
-          let result=plan.newCount+" new players · "+plan.updateCount+" updated players";
-          if(names.length)result+="\n\n"+names.slice(0,14).map(x=>"✓ "+x).join("\n");
-          if(names.length>14)result+="\n… +"+(names.length-14);
-          if(plan.skippedCount>0)result+="\n\n"+plan.skippedCount+" row(s) were skipped because of invalid or duplicate data.";
+
+          let result=
+            plan.newCount+" new players · "+
+            plan.updateCount+" updated players · "+
+            plan.unchangedCount+" unchanged";
+
+          if(changedNames.length){
+            result+="\n\n"+
+              changedNames.slice(0,14).map(x=>"✓ "+x).join("\n");
+          }
+          if(changedNames.length>14){
+            result+="\n… +"+(changedNames.length-14);
+          }
+          if(plan.skippedCount>0){
+            result+="\n\n"+plan.skippedCount+
+              " row(s) were skipped because of invalid or duplicate data.";
+          }
 
           showReview({
-            title:"IMPORT COMPLETE",
+            title:plan.hasBackupData?"BACKUP RESTORED":"IMPORT COMPLETE",
             message:result,
             confirmLabel:"OK",
             showCancel:false,
@@ -1252,52 +1654,115 @@
   }
 
   function createPlannerBackup() {
-    const payload={
-      format:"GW_TACTICS_PLANNER_BACKUP",
-      version:1,
-      createdAt:new Date().toISOString(),
-      state
+    if(!window.XLSX){
+      toast("Backup tools are not available.");
+      return;
+    }
+
+    const headers=[
+      "Account Name",
+      "Country",
+      "Region / Time Zone",
+      "Role",
+      "PvP Strength",
+      "Available From (Local Time)",
+      "Available Until (Local Time)",
+      "Available for Double",
+      "Linked Account 1",
+      "Linked Account 2",
+      "Linked Account 3",
+      "Linked Account 4",
+      "Account Type",
+      "Main Account"
+    ];
+
+    const byId=new Map(state.players.map(player=>[player.id,player]));
+    const countryLabel=code=>{
+      const country=D.COUNTRIES.find(item=>item.code===code);
+      return country ? country.name+" ["+code+"]" : code;
     };
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
-    downloadBlob(blob,"GW_Tactics_Backup_"+new Date().toISOString().slice(0,10)+".gwtactics");
-    toast("Planner backup created.");
+    const zoneLabel=player=>{
+      const zone=D.timeZonesForCountry(player.countryCode)
+        .find(item=>item.id===player.timeZoneId);
+      return zone ? zone.label+" ["+player.timeZoneId+"]" : player.timeZoneId;
+    };
+    const timeLabel=minutes=>{
+      const value=Number(minutes);
+      if(value===1440)return "24:00";
+      const normalized=((value%(24*60))+(24*60))%(24*60);
+      return String(Math.floor(normalized/60)).padStart(2,"0")+":"+
+        String(normalized%60).padStart(2,"0");
+    };
+    const roleLabelForBackup=role=>
+      role==="PVP"?"PvP":role==="PVZ"?"PvZ":"Both";
+    const strengthLabel=player=>{
+      if(player.role==="PVZ"||!player.pvpStars)return "";
+      const stars=Math.max(1,Math.min(5,Number(player.pvpStars)));
+      return "★".repeat(stars)+"☆".repeat(5-stars);
+    };
+    const doubleLabel=preference=>
+      preference==="PREFERRED"?"Preferred":
+      preference==="DO_NOT_USE"?"No":"Yes";
+
+    const rows=[headers];
+    [...state.players]
+      .sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:"base"}))
+      .forEach(player=>{
+        const linkedNames=(player.linkedAccountIds||[])
+          .map(id=>byId.get(id)?.name)
+          .filter(Boolean)
+          .sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}))
+          .slice(0,4);
+        while(linkedNames.length<4)linkedNames.push("");
+
+        rows.push([
+          player.name,
+          countryLabel(player.countryCode),
+          zoneLabel(player),
+          roleLabelForBackup(player.role),
+          strengthLabel(player),
+          timeLabel(player.preferredStartMinutes),
+          timeLabel(player.preferredEndMinutes),
+          doubleLabel(player.doubleAttackPreference),
+          ...linkedNames,
+          player.accountType||"MAIN",
+          player.mainAccountId ? byId.get(player.mainAccountId)?.name||"" : ""
+        ]);
+      });
+
+    const sheet=XLSX.utils.aoa_to_sheet(rows);
+    sheet["!cols"]=[
+      {wch:24},{wch:28},{wch:30},{wch:15},{wch:15},{wch:18},{wch:18},{wch:29},
+      {wch:24,hidden:true},{wch:24,hidden:true},{wch:24,hidden:true},
+      {wch:24,hidden:true},{wch:16,hidden:true},{wch:24,hidden:true}
+    ];
+
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,sheet,"Players");
+    const bytes=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    const blob=new Blob(
+      [bytes],
+      {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+    );
+    downloadBlob(
+      blob,
+      "GW_Tactics_Players_Backup_"+new Date().toISOString().slice(0,10)+".xlsx"
+    );
+    toast("Player backup created.");
   }
 
   async function restorePlannerBackup(file) {
-    try {
-      const parsed=JSON.parse(await file.text());
-      if(parsed?.format!=="GW_TACTICS_PLANNER_BACKUP"||parsed?.version!==1||!parsed?.state?.players||!parsed?.state?.weeks){
-        throw new Error("Invalid backup");
-      }
-      const playerCount=Array.isArray(parsed.state.players)?parsed.state.players.length:0;
-      const savedWeekCount=parsed.state.weeks?Object.keys(parsed.state.weeks).length:0;
-      const restoreMessage=
-        "Backup contains "+playerCount+" players · "+savedWeekCount+" saved weeks.\n\n"+
-        "This replaces the current Planner players, linked accounts, availability and saved week plans. Continue?";
+    const name=String(file?.name||"").toLowerCase();
+    const isXlsx=
+      name.endsWith(".xlsx") ||
+      file?.type==="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-      showReview({
-        title:"RESTORE BACKUP",
-        message:restoreMessage,
-        confirmLabel:"RESTORE BACKUP",
-        onConfirm:()=>{
-          state=parsed.state;
-          state.selectedWeek=Math.max(1,Math.min(4,state.selectedWeek||1));
-          selectedDay=D.DAYS[0].id;selectedView="MAP";
-          saveState();renderAll();
-          if(el.playerDataDialog.open)el.playerDataDialog.close();
-
-          showReview({
-            title:"BACKUP RESTORED",
-            message:"Restored "+playerCount+" players and "+savedWeekCount+" saved weeks.",
-            confirmLabel:"OK",
-            showCancel:false,
-          });
-        },
-      });
-    } catch(err) {
-      console.error(err);
-      toast("The selected backup could not be restored.");
+    if(!isXlsx){
+      toast("Select a GW Tactics .xlsx backup.");
+      return;
     }
+
+    await handlePlayerWorkbook(file);
   }
 
   function openModalSafe(dialog) {
