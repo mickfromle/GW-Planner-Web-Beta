@@ -21,7 +21,10 @@
     restoreBackupBtn:byId("restoreBackupBtn"), playerWorkbookInput:byId("playerWorkbookInput"),
     backupInput:byId("backupInput"), reviewDialog:byId("reviewDialog"),
     reviewDialogTitle:byId("reviewDialogTitle"), reviewDialogMessage:byId("reviewDialogMessage"),
-    reviewCancelBtn:byId("reviewCancelBtn"), reviewConfirmBtn:byId("reviewConfirmBtn")
+    reviewInfoActions:byId("reviewInfoActions"),
+    reviewCancelBtn:byId("reviewCancelBtn"), reviewConfirmBtn:byId("reviewConfirmBtn"),
+    reviewDetailDialog:byId("reviewDetailDialog"), reviewDetailTitle:byId("reviewDetailTitle"),
+    reviewDetailMessage:byId("reviewDetailMessage"), reviewDetailOkBtn:byId("reviewDetailOkBtn")
   };
 
   function normalizeShortCode(value) {
@@ -221,6 +224,7 @@
     cancelLabel="CANCEL",
     showCancel=true,
     onConfirm=null,
+    infoActions=[],
   }) {
     reviewAction=onConfirm;
     el.reviewDialogTitle.textContent=title;
@@ -228,7 +232,29 @@
     el.reviewConfirmBtn.textContent=confirmLabel;
     el.reviewCancelBtn.textContent=cancelLabel;
     el.reviewCancelBtn.classList.toggle("hidden",!showCancel);
+
+    el.reviewInfoActions.innerHTML="";
+    infoActions.forEach(action=>{
+      const button=document.createElement("button");
+      button.type="button";
+      button.className="review-info-btn"+(action.warning?" warning":"");
+      button.textContent=action.label;
+      button.onclick=()=>showReviewDetail(action.title,action.message);
+      el.reviewInfoActions.appendChild(button);
+    });
+    el.reviewInfoActions.classList.toggle("hidden",!infoActions.length);
+
     if(!el.reviewDialog.open)el.reviewDialog.showModal();
+  }
+
+  function showReviewDetail(title,message) {
+    el.reviewDetailTitle.textContent=title;
+    el.reviewDetailMessage.textContent=message;
+    if(!el.reviewDetailDialog.open)el.reviewDetailDialog.showModal();
+  }
+
+  function closeReviewDetail() {
+    if(el.reviewDetailDialog.open)el.reviewDetailDialog.close();
   }
 
   function closeReview() {
@@ -1625,6 +1651,95 @@
     renderPlan();
   }
 
+  function importTimeLabel(minutes) {
+    const normalized=((Number(minutes)||0)%1440+1440)%1440;
+    return String(Math.floor(normalized/60)).padStart(2,"0")+":"+
+      String(normalized%60).padStart(2,"0");
+  }
+
+  function importTimeRange(start,end) {
+    return importTimeLabel(start)+"–"+importTimeLabel(end);
+  }
+
+  function importDoubleLabel(value) {
+    return value==="PREFERRED"
+      ? "Preferred for double attacks"
+      : value==="DO_NOT_USE"
+        ? "Do not use for double attacks"
+        : "Allowed for double attacks";
+  }
+
+  function importRoleLabel(value) {
+    return value==="PVP"?"PvP":value==="PVZ"?"PvZ":"Both";
+  }
+
+  function importStars(value) {
+    return Number.isFinite(value)&&value>0?"★".repeat(value):"—";
+  }
+
+  function importNewDetails(plan) {
+    return plan.parsed
+      .filter(row=>row.status==="NEW")
+      .map(row=>
+        row.name+"\n"+
+        "• "+row.countryCode+" · "+row.timeZoneId+"\n"+
+        "• "+importRoleLabel(row.role)+(row.pvpStars?" · "+importStars(row.pvpStars):"")+"\n"+
+        "• "+importTimeRange(row.preferredStartMinutes,row.preferredEndMinutes)+" · "+
+          importDoubleLabel(row.doubleAttackPreference)
+      )
+      .join("\n\n");
+  }
+
+  function importUpdateChanges(row) {
+    const current=row.existing;
+    if(!current)return [];
+    const changes=[];
+    const push=(label,oldValue,newValue)=>{
+      if(String(oldValue)!==String(newValue))changes.push(label+": "+oldValue+" → "+newValue);
+    };
+
+    push("Name",current.name,row.name);
+    push("Country",current.countryCode,row.countryCode);
+    push("Time zone",current.timeZoneId,row.timeZoneId);
+    push("Role",importRoleLabel(current.role),importRoleLabel(row.role));
+    push("PvP strength",importStars(current.pvpStars),importStars(row.pvpStars));
+
+    const oldTime=importTimeRange(current.preferredStartMinutes,current.preferredEndMinutes);
+    const newTime=importTimeRange(row.preferredStartMinutes,row.preferredEndMinutes);
+    push("Play time",oldTime,newTime);
+
+    push("Double attacks",importDoubleLabel(current.doubleAttackPreference),importDoubleLabel(row.doubleAttackPreference));
+
+    if(row.backupAccountType!==null){
+      const byId=new Map(state.players.map(player=>[player.id,player]));
+      const oldLinked=(current.linkedAccountIds||[])
+        .map(id=>byId.get(id)?.name)
+        .filter(Boolean)
+        .sort((a,b)=>a.localeCompare(b))
+        .join(", ")||"—";
+      const newLinked=[...(row.linkedNames||[])]
+        .sort((a,b)=>a.localeCompare(b))
+        .join(", ")||"—";
+      push("Linked accounts",oldLinked,newLinked);
+      push("Account type",current.accountType||"MAIN",row.backupAccountType||"MAIN");
+      const oldMain=current.mainAccountId?byId.get(current.mainAccountId)?.name||"—":"—";
+      const newMain=row.backupMainAccountName||"—";
+      push("Main account",oldMain,newMain);
+    }
+
+    return changes;
+  }
+
+  function importUpdateDetails(plan) {
+    return plan.parsed
+      .filter(row=>row.status==="UPDATED")
+      .map(row=>{
+        const changes=importUpdateChanges(row);
+        return row.name+(changes.length?"\n"+changes.map(x=>"• "+x).join("\n"):"");
+      })
+      .join("\n\n");
+  }
+
   async function handlePlayerWorkbook(file) {
     try {
       const bytes=await file.arrayBuffer();
@@ -1647,41 +1762,36 @@
         return;
       }
 
-      const newNames=plan.parsed
-        .filter(row=>row.status==="NEW")
-        .map(row=>row.name)
-        .sort((a,b)=>a.localeCompare(b));
-      const updateNames=plan.parsed
-        .filter(row=>row.status==="UPDATED")
-        .map(row=>row.name)
-        .sort((a,b)=>a.localeCompare(b));
+      const infoActions=[];
+      if(plan.newCount>0){
+        infoActions.push({
+          label:plan.newCount+" NEW",
+          title:"NEW PLAYERS",
+          message:importNewDetails(plan),
+        });
+      }
+      if(plan.updateCount>0){
+        infoActions.push({
+          label:plan.updateCount+" UPDATES",
+          title:"UPDATES",
+          message:importUpdateDetails(plan),
+        });
+      }
+      if(plan.warnings.length>0){
+        infoActions.push({
+          label:plan.warnings.length+" WARNINGS",
+          title:"WARNINGS",
+          message:plan.warnings.map(x=>"• "+x).join("\n"),
+          warning:true,
+        });
+      }
 
-      let message=
-        plan.newCount+" new · "+
-        plan.updateCount+" updates · "+
-        plan.unchangedCount+" unchanged · "+
-        plan.warnings.length+" warnings";
-
-      if(newNames.length){
-        message+="\n\nNEW\n"+
-          newNames.slice(0,10).map(x=>"• "+x).join("\n")+
-          (newNames.length>10?"\n… +"+(newNames.length-10):"");
-      }
-      if(updateNames.length){
-        message+="\n\nUPDATE\n"+
-          updateNames.slice(0,10).map(x=>"• "+x).join("\n")+
-          (updateNames.length>10?"\n… +"+(updateNames.length-10):"");
-      }
-      if(plan.warnings.length){
-        message+="\n\nWARNINGS\n"+
-          plan.warnings.slice(0,6).map(x=>"• "+x).join("\n")+
-          (plan.warnings.length>6?"\n… +"+(plan.warnings.length-6):"");
-      }
-      message+="\n\nImport the valid player rows now?";
+      const message="Import the valid player rows now?";
 
       showReview({
         title:plan.hasBackupData?"RESTORE BACKUP":"IMPORT PLAYERS",
         message,
+        infoActions,
         confirmLabel:plan.hasBackupData?"RESTORE BACKUP":"IMPORT PLAYERS",
         onConfirm:()=>{
           applyWorkbookImport(plan);
@@ -1694,8 +1804,7 @@
 
           let result=
             plan.newCount+" new players · "+
-            plan.updateCount+" updated players · "+
-            plan.unchangedCount+" unchanged";
+            plan.updateCount+" updated players";
 
           if(changedNames.length){
             result+="\n\n"+
@@ -1871,6 +1980,8 @@
   el.backupInput.onchange=()=>{const file=el.backupInput.files?.[0];if(file)restorePlannerBackup(file);};
   document.querySelectorAll("[data-close-export]").forEach(x=>x.onclick=()=>el.exportDialog.close());
   document.querySelectorAll("[data-close-review]").forEach(x=>x.onclick=closeReview);
+  document.querySelectorAll("[data-close-review-detail]").forEach(x=>x.onclick=closeReviewDetail);
+  el.reviewDetailOkBtn.onclick=closeReviewDetail;
   el.reviewCancelBtn.onclick=closeReview;
   el.reviewConfirmBtn.onclick=()=>{
     const action=reviewAction;
