@@ -695,6 +695,26 @@ select[size] { min-height: 180px; }
 .assignment-table td:nth-child(5) { width: 8%; text-align: center; }
 .assignment-table th:nth-child(6),
 .assignment-table td:nth-child(6) { width: 24%; white-space: nowrap; }
+.assignment-table.export-time-table th:nth-child(1),
+.assignment-table.export-time-table td:nth-child(1) { width: 22%; }
+.assignment-table.export-time-table th:nth-child(2),
+.assignment-table.export-time-table td:nth-child(2) {
+  width: 24%;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.assignment-table.export-time-table th:nth-child(3),
+.assignment-table.export-time-table td:nth-child(3) { width: 8%; text-align: center; }
+.assignment-table.export-time-table th:nth-child(4),
+.assignment-table.export-time-table td:nth-child(4) { width: 12%; text-align: center; white-space: nowrap; }
+.assignment-table.export-time-table th:nth-child(5),
+.assignment-table.export-time-table td:nth-child(5),
+.assignment-table.export-time-table th:nth-child(6),
+.assignment-table.export-time-table td:nth-child(6) { width: 7%; text-align: center; }
+.assignment-table.export-time-table th:nth-child(7),
+.assignment-table.export-time-table td:nth-child(7) { width: 20%; white-space: nowrap; }
+
 .player-cell {
   display: flex;
   align-items: center;
