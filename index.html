@@ -9,9 +9,24 @@
   <meta name="robots" content="noindex,nofollow">
   <title>GW Tactics – Planner Web Beta</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="./styles.css?v=20260920-1815">
+  <link rel="stylesheet" href="./styles.css?v=20260922-2150">
 </head>
 <body>
+  <div id="jsErrorPanel" style="display:none;position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:#2b0d11;color:#fff;border:1px solid #ff5364;border-radius:10px;padding:12px;font:13px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;white-space:pre-wrap"></div>
+  <script>
+    window.addEventListener("error", function (event) {
+      var panel=document.getElementById("jsErrorPanel");
+      if(!panel)return;
+      panel.style.display="block";
+      panel.textContent="WEB ERROR\n"+(event.message||"Unknown error")+"\n"+((event.filename||"").split("/").pop())+":"+event.lineno;
+    });
+    window.addEventListener("unhandledrejection", function (event) {
+      var panel=document.getElementById("jsErrorPanel");
+      if(!panel)return;
+      panel.style.display="block";
+      panel.textContent="WEB ERROR\n"+String(event.reason||"Unhandled promise rejection");
+    });
+  </script>
   <div class="app-shell">
     <header class="hero">
       <div>
@@ -53,7 +68,7 @@
         <div class="section-head">
           <div>
             <div class="section-kicker">GUILD</div>
-            <h2>Players</h2>
+            <h2>PLAYER AVAILABILITY</h2>
             <div id="playerCount" class="muted"></div>
           </div>
           <div class="section-actions">
@@ -62,7 +77,7 @@
           </div>
         </div>
         <div class="muted compact">
-          Availability is saved per week. Country and time zone are used to calculate each player's real local play window.
+          Availability applies to the selected week. All days are available by default; change only the days a player cannot play.
         </div>
         <div id="playerList" class="player-list"></div>
       </section>
@@ -80,32 +95,17 @@
         <div class="section-head">
           <div>
             <div class="section-kicker">PLAN</div>
-            <h2 id="planTitle">Week preview</h2>
+            <h2 id="planTitle">Plan preview</h2>
           </div>
-          <div class="section-actions">
-            <button id="openPreviewBtn" class="btn btn-primary">PREVIEW</button>
-            <button id="exportBtn" class="btn btn-secondary">EXPORT</button>
-          </div>
+          <button id="exportBtn" class="btn btn-secondary">EXPORT</button>
         </div>
+
+        <div id="dayTabs" class="day-tabs"></div>
+        <div id="viewTabs" class="view-tabs"></div>
+        <div id="planPreview" class="preview-wrap"></div>
       </section>
     </main>
   </div>
-
-  <dialog id="planPreviewDialog" class="plan-preview-dialog">
-    <div class="plan-preview-shell">
-      <div class="plan-preview-head">
-        <div>
-          <div class="section-kicker">GW TACTICS</div>
-          <h2>PLAN PREVIEW</h2>
-        </div>
-        <button type="button" class="icon-btn" data-close-plan-preview>×</button>
-      </div>
-      <div id="previewWeekTabs" class="week-tabs preview-week-tabs"></div>
-      <div id="dayTabs" class="day-tabs preview-day-tabs"></div>
-      <div id="viewTabs" class="view-tabs hidden"></div>
-      <div id="planPreview" class="preview-wrap preview-screen-wrap"></div>
-    </div>
-  </dialog>
 
   <dialog id="playerDataDialog" class="modal">
     <div class="modal-card">
@@ -125,10 +125,10 @@
       </div>
 
       <input id="playerWorkbookInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
-      <input id="backupInput" type="file" accept=".gwtactics,.json,application/json" class="hidden">
+      <input id="backupInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
 
       <div class="muted compact">
-        The Excel template uses dropdowns for all player fields except Account Name. Linked Account dropdowns use the names entered in the same workbook.
+        The Excel template uses dropdowns for all player fields except Account Name. Linked accounts are managed only inside GW Tactics and are included in backups.
       </div>
     </div>
   </dialog>
@@ -265,7 +265,8 @@
       </label>
 
       <div class="check-list">
-        <label><input type="checkbox" name="exportView" value="MAP" checked> <span>MAP · ISLANDS + PLAYER ASSIGNMENTS + TIMELINE</span></label>
+        <label><input type="checkbox" name="exportView" value="MAP" checked> <span>MAP · ISLANDS + PLAYER ASSIGNMENTS</span></label>
+        <label><input type="checkbox" name="exportView" value="TIMELINE" checked> <span>TIMELINE · STACKING</span></label>
       </div>
 
       <div id="exportStatus" class="muted compact"></div>
@@ -286,8 +287,8 @@
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="./data.js?v=20260920-1655"></script>
-  <script src="./planner-engine.js?v=20260920-2205"></script>
-  <script src="./app.js?v=20260920-2205"></script>
+  <script src="./data.js?v=20260922-2150"></script>
+  <script src="./planner-engine.js?v=20260922-2150"></script>
+  <script src="./app.js?v=20260922-2150"></script>
 </body>
 </html>
