@@ -235,12 +235,19 @@
 
     el.reviewInfoActions.innerHTML="";
     infoActions.forEach(action=>{
-      const button=document.createElement("button");
-      button.type="button";
-      button.className="review-info-btn"+(action.warning?" warning":"");
-      button.textContent=action.label;
-      button.onclick=()=>showReviewDetail(action.title,action.message);
-      el.reviewInfoActions.appendChild(button);
+      const link=document.createElement("span");
+      link.className="review-info-link"+(action.warning?" warning":"");
+      link.textContent=action.label+"  ›";
+      link.tabIndex=0;
+      link.setAttribute("role","button");
+      link.onclick=()=>showReviewDetail(action.title,action.message);
+      link.onkeydown=event=>{
+        if(event.key==="Enter"||event.key===" "){
+          event.preventDefault();
+          showReviewDetail(action.title,action.message);
+        }
+      };
+      el.reviewInfoActions.appendChild(link);
     });
     el.reviewInfoActions.classList.toggle("hidden",!infoActions.length);
 
