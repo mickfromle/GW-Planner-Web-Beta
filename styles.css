@@ -882,17 +882,26 @@ select[size] { min-height: 180px; }
   color: #fff;
 }
 .review-info-actions {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
   margin: 8px 0 10px;
+  font-size: 13px;
 }
 .review-info-link {
-  display: block;
-  padding: 6px 0;
+  display: inline;
+  padding: 2px 0;
   color: #ff5160;
   font-weight: 900;
   cursor: pointer;
   user-select: none;
+}
+.review-info-link + .review-info-link::before {
+  content: " · ";
+  color: #c4d2d9;
+  font-weight: 400;
+  cursor: default;
 }
 .review-info-link.warning {
   color: #f5bb4f;
