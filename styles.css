@@ -883,26 +883,24 @@ select[size] { min-height: 180px; }
 }
 .review-info-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit,minmax(110px,1fr));
-  gap: 8px;
-  margin: 10px 0;
+  gap: 2px;
+  margin: 8px 0 10px;
 }
-.review-info-btn {
-  min-height: 42px;
-  border: 1px solid #5a343b;
-  background: #201216;
+.review-info-link {
+  display: block;
+  padding: 6px 0;
   color: #ff5160;
-  border-radius: 10px;
   font-weight: 900;
   cursor: pointer;
+  user-select: none;
 }
-.review-info-btn.warning {
+.review-info-link.warning {
   color: #f5bb4f;
-  border-color: #665127;
-  background: #211b0f;
 }
-.review-info-btn:active {
-  transform: translateY(1px);
+.review-info-link:hover,
+.review-info-link:focus-visible {
+  text-decoration: underline;
+  outline: none;
 }
 
 .modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
