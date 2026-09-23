@@ -1793,7 +1793,14 @@
         });
       }
 
-      const message="Import the valid player rows now?";
+      const affectedLinks=plan.parsed
+        .filter(row=>row.status!=="UNCHANGED"&&(row.linkedNames||[]).length)
+        .map(row=>row.name+" → "+row.linkedNames.join(", "));
+      const message=
+        (affectedLinks.length
+          ? "LINKED ACCOUNTS\n"+affectedLinks.map(x=>"• "+x).join("\n")+"\n\n"
+          : "")+
+        "Import the valid player rows now?";
 
       showReview({
         title:plan.hasBackupData?"RESTORE BACKUP":"IMPORT PLAYERS",
